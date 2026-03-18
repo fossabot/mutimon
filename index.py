@@ -16,19 +16,17 @@ Usage:
 Designed to run as a daily cron job.
 """
 
+# === Standard library imports (always available) ===
 import argparse
 import json
 import os
 import re
 import shutil
-import sys
 import smtplib
-import requests
-import pystache
-from croniter import croniter
-from email.message import EmailMessage
+import sys
+import traceback
 from datetime import datetime
-from bs4 import BeautifulSoup
+from email.message import EmailMessage
 from urllib.parse import urljoin
 
 # ========================= PATHS =========================
@@ -40,6 +38,72 @@ SKELETON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skeleto
 
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
 # =========================================================
+
+
+def send_error_email(subject, body):
+    """
+    Send an error notification using only stdlib.
+
+    Reads SMTP config and recipient emails directly from config.json.
+    This function must not depend on any third-party library so it works
+    even when the error is a missing dependency.
+    """
+    try:
+        if not os.path.exists(CONFIG_FILE):
+            return
+
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            config = json.load(f)
+
+        server_config = config.get("email", {}).get("server", {})
+        host = server_config.get("host")
+        port = server_config.get("port", 587)
+        sender = server_config.get("email")
+        password = server_config.get("password")
+
+        if not all([host, sender, password]):
+            return
+
+        # Collect unique recipient emails from all rules
+        recipients = set()
+        for rule in config.get("rules", []):
+            email = rule.get("email")
+            if email:
+                recipients.add(email)
+        if not recipients:
+            recipients.add(sender)
+
+        for recipient in recipients:
+            msg = EmailMessage()
+            msg["From"] = sender
+            msg["To"] = recipient
+            msg["Subject"] = subject
+            msg.set_content(body)
+
+            with smtplib.SMTP(host, port, timeout=30) as server:
+                server.starttls()
+                server.login(sender, password)
+                server.send_message(msg)
+
+    except Exception:
+        # If sending the error email itself fails, just print — don't recurse
+        traceback.print_exc()
+
+
+# === Third-party imports ===
+try:
+    import requests
+    import pystache
+    from croniter import croniter
+    from bs4 import BeautifulSoup
+except ImportError:
+    tb = traceback.format_exc()
+    print(tb, file=sys.stderr)
+    send_error_email(
+        "[notifier] Missing dependency",
+        f"The notifier script failed to start at {datetime.now()}.\n\n{tb}",
+    )
+    sys.exit(1)
 
 
 def init_config():
@@ -643,4 +707,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        tb = traceback.format_exc()
+        print(tb, file=sys.stderr)
+        send_error_email(
+            "[notifier] Fatal error",
+            f"The notifier script crashed at {datetime.now()}.\n\n{tb}",
+        )
