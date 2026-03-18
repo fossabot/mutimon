@@ -36,10 +36,14 @@ python3 index.py --dry-run        # fetch and display data, no emails, no state 
 
 ### Cron example
 
-Run the script every hour on the hour. Each rule's `schedule` field controls when it actually executes:
+Run the script periodically via system cron. Each rule's `schedule` field controls when it actually executes:
 
 ```cron
-0 * * * * /usr/bin/python3 /path/to/index.py
+# Every hour (matches schedules with minute=0)
+0 * * * * bash -l -c 'python3 /path/to/index.py' >> ~/.notifier/notifier.log 2>&1
+
+# Every 5 minutes (matches any minute-level schedule)
+*/5 * * * * bash -l -c 'python3 /path/to/index.py' >> ~/.notifier/notifier.log 2>&1
 ```
 
 ## File structure
@@ -291,12 +295,12 @@ The schedule uses [croniter](https://github.com/kiorky/croniter) to parse standa
 
 ### How it works
 
-The script is designed to be invoked every hour by system cron (`0 * * * *`). On each invocation:
+The script is designed to be invoked periodically by system cron (e.g. every 5 minutes or every hour). On each invocation:
 
-1. The current time is truncated to the start of the hour (e.g. 14:03 becomes 14:00)
-2. Each rule's cron expression is checked against that hour using `croniter.match`
-3. If it matches and the rule hasn't already run this hour, it executes
-4. After a successful run, a timestamp is saved to `~/.notifier/data/.lastrun_<rule_name>` to prevent duplicate runs if the script is triggered again within the same hour
+1. The current time is truncated to the start of the minute (e.g. 14:03:27 becomes 14:03:00)
+2. Each rule's cron expression is checked against that time using `croniter.match`
+3. If it matches and the rule hasn't already run in this minute window, it executes
+4. After a successful run, a timestamp is saved to `~/.notifier/data/.lastrun_<rule_name>` to prevent duplicate runs if the script is triggered again within the same minute
 5. If no schedule is set, the rule runs every time
 6. Use `--force` to bypass all schedules
 

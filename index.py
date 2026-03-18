@@ -200,32 +200,32 @@ def should_run_now(rule):
     """
     Check if a rule should run based on its cron schedule.
 
-    The script is designed to be invoked every hour by system cron.
-    We check if the current time (truncated to the start of the hour)
-    matches the rule's cron expression. Additionally, the last-run
-    timestamp prevents duplicate runs within the same hour.
+    The script is invoked periodically by system cron (e.g. every 5 minutes
+    or every hour). We check if the current time (truncated to the start of
+    the minute) matches the rule's cron expression. The last-run timestamp
+    prevents duplicate runs within the same minute window.
 
     Returns True if:
       - No schedule is defined (always run)
-      - The current hour matches the cron expression AND the rule
-        hasn't already run this hour
+      - The current minute matches the cron expression AND the rule
+        hasn't already run in this minute window
     """
     schedule = rule.get("schedule")
     if not schedule:
         return True
 
-    # Truncate to the start of the current hour
-    now = datetime.now().replace(minute=0, second=0, microsecond=0)
+    # Truncate to the start of the current minute
+    now = datetime.now().replace(second=0, microsecond=0)
 
     if not croniter.match(schedule, now):
         return False
 
-    # Prevent duplicate runs within the same hour
+    # Prevent duplicate runs within the same minute
     rule_name = rule["name"]
     last_run = load_last_run(rule_name)
     if last_run is not None:
-        last_run_hour = last_run.replace(minute=0, second=0, microsecond=0)
-        if last_run_hour >= now:
+        last_run_minute = last_run.replace(second=0, microsecond=0)
+        if last_run_minute >= now:
             return False
 
     return True
