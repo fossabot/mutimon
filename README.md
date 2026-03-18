@@ -61,6 +61,8 @@ Run the script periodically via system cron. Each rule's `schedule` field contro
 
 ## Configuration
 
+A [JSON Schema](config.schema.json) is provided for editor autocompletion and validation. Add `"$schema": "./config.schema.json"` to your config file, or point to the raw URL if hosted on GitHub.
+
 The config file (`~/.notifier/config.json`) has three sections:
 
 ### `email` -- SMTP server
