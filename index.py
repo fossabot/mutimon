@@ -13,6 +13,7 @@ Usage:
     index.py --dry-run        # fetch and display data without sending emails
     index.py --save-email     # save emails to file instead of sending
     index.py --validate       # validate config and exit
+    index.py -q               # run silently (for cron)
 
 Designed to run as a daily cron job.
 """
@@ -864,7 +865,17 @@ def main():
         action="store_true",
         help="Validate the config file against the schema and exit",
     )
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Suppress all output",
+    )
     args = parser.parse_args()
+
+    if args.quiet:
+        sys.stdout = open(os.devnull, "w")
+        sys.stderr = open(os.devnull, "w")
 
     init_config()
     config = load_config()
