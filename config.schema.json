@@ -372,7 +372,7 @@
     },
     "inputEntry": {
       "type": "object",
-      "description": "A single input entry that provides parameters for one page fetch and an optional validator expression to filter results.",
+      "description": "A single input entry that provides parameters for one page fetch and an optional validator to filter results.",
       "additionalProperties": false,
       "properties": {
         "params": {
@@ -387,13 +387,49 @@
           ]
         },
         "validator": {
+          "description": "Filter extracted items. A single validator object (AND logic within), or an array of validators (OR logic — item passes if any validator passes).",
+          "oneOf": [
+            { "$ref": "#/$defs/validator" },
+            {
+              "type": "array",
+              "items": { "$ref": "#/$defs/validator" },
+              "minItems": 1
+            }
+          ]
+        }
+      }
+    },
+    "validator": {
+      "type": "object",
+      "description": "Validates extracted items. All specified conditions must pass (AND logic). Items that fail are excluded from results.",
+      "additionalProperties": false,
+      "properties": {
+        "test": {
           "type": "string",
-          "description": "A numexpr expression with Mustache variable placeholders. The expression is evaluated after variable extraction. Items where the expression evaluates to false are excluded. Variables with 'parse: number' are available as floats. Use & for AND, | for OR, and parentheses for grouping.",
+          "description": "A numexpr expression with Mustache variable placeholders. Variables with 'parse: number' are available as floats. The expression must evaluate to true for the item to be included. Use & for AND, | for OR, and parentheses for grouping.",
           "examples": [
             "{{price}} > 9.5",
             "{{price}} > 10",
             "({{price}} > 80) & ({{change_pct}} < 0)"
           ]
+        },
+        "match": {
+          "type": "object",
+          "description": "Regex match against a Mustache-rendered variable value. The item is included if the regex matches.",
+          "required": ["value", "regex"],
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "type": "string",
+              "description": "Mustache template string to render against item variables. The rendered result is tested against the regex.",
+              "examples": ["{{title}}", "{{company}}", "{{category}}"]
+            },
+            "regex": {
+              "type": "string",
+              "description": "Regex pattern to match against the rendered value. Uses re.search() so it matches anywhere in the string unless anchored with ^ or $.",
+              "examples": ["^Ask HN", "BIOMAXIMA", "^(SEO|Marketing)"]
+            }
+          }
         }
       }
     }

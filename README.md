@@ -9,7 +9,7 @@ Designed to run as a cron job. Each rule has its own schedule (cron expression),
 ### Dependencies
 
 ```bash
-pip install requests beautifulsoup4 pystache croniter numexpr
+pip install requests beautifulsoup4 pystache croniter numexpr jsonschema
 ```
 
 ### First run
@@ -62,6 +62,8 @@ Run the script periodically via system cron. Each rule's `schedule` field contro
 ## Configuration
 
 A [JSON Schema](config.schema.json) is provided for editor autocompletion and validation. Add `"$schema": "./config.schema.json"` to your config file, or point to the raw URL if hosted on GitHub.
+
+The config is validated against the schema on every run. If the config is invalid, an error email with all validation errors is sent to all rule recipients and the script exits.
 
 The config file (`~/.notifier/config.json`) has three sections:
 
@@ -258,15 +260,19 @@ Params from each input entry are merged into the extracted items, so they're ava
 
 ## Validators
 
-Each input entry can have a `validator` -- a [numexpr](https://numexpr.readthedocs.io/) expression with Mustache variable placeholders. Items where the expression evaluates to false are excluded from the results.
+Each input entry can have a `validator` object that filters extracted items. The validator supports two condition types. If both are present, both must pass (AND logic).
+
+### `test` -- Numeric expression
+
+A [numexpr](https://numexpr.readthedocs.io/) expression with Mustache variable placeholders. Variables should use `"parse": "number"` in the definition so they're available as floats.
 
 ```json
-"validator": "{{price}} > 9.5"
+"validator": {
+  "test": "{{price}} > 9.5"
+}
 ```
 
-Variables referenced in the validator should use `"parse": "number"` in the definition so they're available as floats.
-
-### Supported operations
+Supported operations:
 
 | Operator | Example |
 |----------|---------|
@@ -277,6 +283,47 @@ Variables referenced in the validator should use `"parse": "number"` in the defi
 | Functions | `abs({{change_pct}}) > 3` |
 
 Use parentheses to group compound expressions. See the [numexpr documentation](https://numexpr.readthedocs.io/) for the full list of supported operations.
+
+### `match` -- Regex match
+
+Matches a Mustache-rendered variable value against a regex pattern. Uses `re.search()` so the pattern matches anywhere unless anchored with `^` or `$`.
+
+```json
+"validator": {
+  "match": {
+    "value": "{{title}}",
+    "regex": "^Ask HN"
+  }
+}
+```
+
+### Combined example
+
+Both conditions must pass (AND logic within a single object):
+
+```json
+"validator": {
+  "test": "{{price}} > 80",
+  "match": {
+    "value": "{{company}}",
+    "regex": "Asseco"
+  }
+}
+```
+
+### Array of validators (OR logic)
+
+The validator can also be an array. The item is included if **any** validator in the array passes. This is useful for defining price thresholds or notification steps:
+
+```json
+"validator": [
+  { "test": "{{price}} > 8" },
+  { "test": "{{price}} > 9" },
+  { "test": "{{price}} > 9.5" }
+]
+```
+
+Each entry in the array is a full validator object that can use `test`, `match`, or both.
 
 ## Pagination
 

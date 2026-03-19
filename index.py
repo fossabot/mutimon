@@ -12,6 +12,7 @@ Usage:
     index.py --force          # ignore schedules and run all rules
     index.py --dry-run        # fetch and display data without sending emails
     index.py --save-email     # save emails to file instead of sending
+    index.py --validate       # validate config and exit
 
 Designed to run as a daily cron job.
 """
@@ -97,6 +98,7 @@ try:
     import numexpr
     from croniter import croniter
     from bs4 import BeautifulSoup
+    from jsonschema import Draft202012Validator
 except ImportError:
     tb = traceback.format_exc()
     print(tb, file=sys.stderr)
@@ -157,6 +159,43 @@ def load_config():
     """Load the configuration file."""
     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def validate_config(config):
+    """
+    Validate config against the JSON Schema.
+
+    Sends an error email listing all validation errors and exits
+    if the config is invalid.
+    """
+    schema_file = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "config.schema.json"
+    )
+    if not os.path.exists(schema_file):
+        print(f"Warning: Schema file not found at {schema_file}, skipping validation.")
+        return
+
+    with open(schema_file, "r", encoding="utf-8") as f:
+        schema = json.load(f)
+
+    validator = Draft202012Validator(schema)
+    errors = list(validator.iter_errors(config))
+
+    if not errors:
+        return
+
+    lines = [f"Config validation failed with {len(errors)} error(s):\n"]
+    for i, err in enumerate(errors, 1):
+        path = ".".join(str(p) for p in err.absolute_path) or "(root)"
+        lines.append(f"  {i}. [{path}] {err.message}")
+
+    msg = "\n".join(lines)
+    print(msg, file=sys.stderr)
+    send_error_email(
+        "[notifier] Invalid configuration",
+        f"The notifier config at {CONFIG_FILE} is invalid.\n\n{msg}",
+    )
+    sys.exit(1)
 
 
 def load_state(rule_name):
@@ -616,30 +655,65 @@ def save_email_to_file(rule_name, subject, body):
     print(f"  [{datetime.now()}] Email saved to {email_file}")
 
 
-def evaluate_validator(validator_expr, item):
+def evaluate_single_validator(validator, item, renderer):
     """
-    Evaluate a validator expression against an item's variables.
+    Evaluate a single validator object against an item's variables.
 
-    The expression is a Mustache-templated numexpr string, e.g.:
-        "{{price}} > 9.5"
-        "({{price}} > 9.5) & ({{change_pct}} < 0)"
+    The validator is a dict with optional keys (AND logic — all must pass):
 
-    Variables are substituted from the item dict. Numeric variables are
-    passed as floats; non-numeric ones are skipped (will cause numexpr error).
+      "test": numexpr expression with Mustache variables, e.g.:
+          "{{price}} > 9.5"
+          "({{price}} > 80) & ({{change_pct}} < 0)"
 
-    Returns True if the expression evaluates to True, False otherwise.
+      "match": regex match against a rendered variable, e.g.:
+          {"value": "{{title}}", "regex": "^Ask HN"}
+
+    Returns True if all specified conditions pass, False otherwise.
     """
-    if not validator_expr:
+    # Evaluate "test" condition (numexpr expression)
+    test_expr = validator.get("test")
+    if test_expr:
+        try:
+            rendered = renderer.render(test_expr, item)
+            if not bool(numexpr.evaluate(rendered)):
+                return False
+        except Exception as e:
+            print(f"    Warning: Validator test failed for '{test_expr}': {e}")
+            return False
+
+    # Evaluate "match" condition (regex match)
+    match_spec = validator.get("match")
+    if match_spec:
+        try:
+            value = renderer.render(match_spec["value"], item)
+            pattern = match_spec["regex"]
+            if not re.search(pattern, value):
+                return False
+        except Exception as e:
+            print(f"    Warning: Validator match failed for '{match_spec}': {e}")
+            return False
+
+    return True
+
+
+def evaluate_validator(validator, item):
+    """
+    Evaluate a validator against an item's variables.
+
+    Accepts:
+      - None/empty: always passes
+      - dict: a single validator (AND logic within)
+      - list: multiple validators (OR logic — any passing means the item is included)
+    """
+    if not validator:
         return True
 
-    try:
-        renderer = pystache.Renderer(escape=lambda u: u)
-        rendered = renderer.render(validator_expr, item)
-        result = bool(numexpr.evaluate(rendered))
-        return result
-    except Exception as e:
-        print(f"    Warning: Validator failed for '{validator_expr}': {e}")
-        return False
+    renderer = pystache.Renderer(escape=lambda u: u)
+
+    if isinstance(validator, list):
+        return any(evaluate_single_validator(v, item, renderer) for v in validator)
+
+    return evaluate_single_validator(validator, item, renderer)
 
 
 def resolve_inputs(rule):
@@ -785,10 +859,22 @@ def main():
         action="store_true",
         help="Ignore schedules and run all rules immediately",
     )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Validate the config file against the schema and exit",
+    )
     args = parser.parse_args()
 
     init_config()
     config = load_config()
+
+    if args.validate:
+        validate_config(config)
+        print(f"Config at {CONFIG_FILE} is valid.")
+        return
+
+    validate_config(config)
 
     rules = config.get("rules", [])
     if not rules:
