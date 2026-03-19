@@ -311,14 +311,14 @@ Matches a Mustache-rendered variable value against a regex pattern. Uses `re.sea
 }
 ```
 
-Set `"negate": true` to invert the match — the condition passes when the regex does **not** match. This is useful for detecting when something disappears from a page:
+Set `"exist": false` to pass when the pattern is **not found**. This is useful for detecting when something disappears from a page:
 
 ```json
 "validator": {
   "match": {
     "value": "{{status}}",
     "regex": "Coming soon",
-    "negate": true
+    "exist": false
   }
 }
 ```
@@ -329,7 +329,7 @@ Set `"negate": true` to invert the match — the condition passes when the regex
 "validator": {
   "match": [
     { "value": "{{platform}}", "regex": "Linux" },
-    { "value": "{{status}}", "regex": "Coming soon", "negate": true }
+    { "value": "{{status}}", "regex": "Coming soon", "exist": false }
   ]
 }
 ```

@@ -724,9 +724,9 @@ def evaluate_single_validator(validator, item, renderer):
             try:
                 value = renderer.render(m["value"], item)
                 pattern = m["regex"]
-                negate = m.get("negate", False)
+                should_exist = m.get("exist", True)
                 matched = bool(re.search(pattern, value))
-                if negate:
+                if not should_exist:
                     matched = not matched
                 if not matched:
                     return False

@@ -450,10 +450,10 @@
           "description": "Regex pattern to match against the rendered value. Uses re.search() so it matches anywhere in the string unless anchored with ^ or $.",
           "examples": ["^Ask HN", "BIOMAXIMA", "Coming soon"]
         },
-        "negate": {
+        "exist": {
           "type": "boolean",
-          "default": false,
-          "description": "When true, the condition passes if the regex does NOT match. Use this to detect when something disappears from a page (e.g. 'Coming soon' label being removed)."
+          "default": true,
+          "description": "Whether the regex pattern should exist in the value. Set to false to detect when something disappears from a page (e.g. a 'Coming soon' label being removed). Default is true (pattern must match)."
         }
       }
     }
