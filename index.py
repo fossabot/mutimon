@@ -97,6 +97,8 @@ try:
     import requests
     import pystache
     import numexpr
+    from babel import Locale
+    from babel.numbers import parse_decimal
     from croniter import croniter
     from bs4 import BeautifulSoup
     from jsonschema import Draft202012Validator
@@ -279,15 +281,39 @@ def render_url(url_template, params):
     return pystache.render(url_template, params)
 
 
+def detect_language(html, response_headers=None):
+    """
+    Detect the page language from HTML lang attribute or Content-Language header.
+    Returns a babel Locale or defaults to en.
+    """
+    # Try <html lang="...">
+    soup = BeautifulSoup(html[:2000], "html.parser")
+    html_tag = soup.find("html")
+    lang = str(html_tag.get("lang", "")) if html_tag else ""
+
+    # Fall back to Content-Language header
+    if not lang and response_headers:
+        lang = response_headers.get("Content-Language", "")
+
+    # Clean up (e.g. "en-US" -> "en_US", "pl" -> "pl")
+    lang = lang.strip().split(",")[0].strip() if lang else "en"
+
+    try:
+        return Locale.parse(lang.replace("-", "_"))
+    except Exception:
+        return Locale.parse("en")
+
+
 def fetch_page(url):
-    """Fetch a single page and return its HTML."""
+    """Fetch a single page and return its HTML and detected locale."""
     headers = {"User-Agent": USER_AGENT}
     resp = requests.get(url, headers=headers, timeout=30)
     resp.raise_for_status()
-    return resp.text
+    locale = detect_language(resp.text, resp.headers)
+    return resp.text, locale
 
 
-def extract_value(element, value_spec, default=None):
+def extract_value(element, value_spec, default=None, locale=None):
     """
     Extract a value from a BeautifulSoup element based on the value spec.
 
@@ -330,38 +356,46 @@ def extract_value(element, value_spec, default=None):
     # Apply type parsing if specified
     parse = value_spec.get("parse")
     if parse == "number":
-        raw = parse_number(raw)
+        raw = parse_number(raw, locale=locale)
 
     return raw
 
 
-def parse_number(value):
+def parse_number(value, locale=None):
     """
-    Parse a string into a float, handling Polish/European number formatting.
+    Parse a string into a float using locale-aware number parsing via babel.
 
-    Handles:
-      - Non-breaking spaces as thousands separators (e.g. "11 800")
-      - Comma as decimal separator (e.g. "11,8000")
-      - Currency suffixes (e.g. "11,8000 zł", "15 772")
-      - Percentage signs (e.g. "-0,84%")
-      - Plus/minus signs
+    Strips currency symbols, whitespace, and percentage signs before parsing.
+    Uses the page's detected locale to correctly interpret decimal and
+    thousands separators (e.g. "70,528.40" in en vs "11,8000" in pl).
+
+    Falls back to a basic parser if babel fails.
     """
     if isinstance(value, (int, float)):
         return value
-    s = str(value)
-    # Remove non-breaking spaces, regular spaces, currency symbols, %
-    s = s.replace("\xa0", "").replace(" ", "")
-    s = re.sub(r"[^\d,.\-+]", "", s)
-    # Replace comma with dot for decimal
-    # If there's both dot and comma, assume comma is decimal (European)
-    if "," in s and "." in s:
-        s = s.replace(".", "").replace(",", ".")
-    elif "," in s:
-        s = s.replace(",", ".")
-    try:
-        return float(s)
-    except (ValueError, TypeError):
+    s = str(value).strip()
+    # Strip leading non-numeric chars (currency symbols like $, €)
+    s = re.sub(r"^[^\d\-+]+", "", s)
+    # Strip trailing non-numeric chars (currency codes like zł, %, USD)
+    s = re.sub(r"[^\d,.]+$", "", s)
+    # Replace non-breaking spaces with regular spaces
+    s = s.replace("\xa0", " ").strip()
+
+    if not s:
         return 0.0
+
+    if locale is None:
+        locale = Locale.parse("en")
+
+    try:
+        return float(parse_decimal(s, locale=locale))
+    except Exception:
+        # Fallback: strip everything except digits, dot, minus
+        s = re.sub(r"[^\d.\-]", "", s)
+        try:
+            return float(s)
+        except (ValueError, TypeError):
+            return 0.0
 
 
 def extract_id(item_data, id_spec, element=None):
@@ -423,7 +457,7 @@ def should_include(element, filter_spec):
     return True
 
 
-def extract_variables(element, variables_spec):
+def extract_variables(element, variables_spec, locale=None):
     """Extract all defined variables from an element.
 
     Supports an optional "sibling" key in the variable spec. When present,
@@ -456,12 +490,12 @@ def extract_variables(element, variables_spec):
 
         sub_element = search_root.select_one(var_spec["selector"])
         default = var_spec.get("default")
-        value = extract_value(sub_element, var_spec["value"], default)
+        value = extract_value(sub_element, var_spec["value"], default, locale=locale)
         data[var_name] = value if value is not None else ""
     return data
 
 
-def parse_items(html, query_spec):
+def parse_items(html, query_spec, locale=None):
     """
     Parse items from HTML based on query specification.
 
@@ -480,7 +514,7 @@ def parse_items(html, query_spec):
             return []
         if not should_include(element, filter_spec):
             return []
-        data = extract_variables(element, variables)
+        data = extract_variables(element, variables, locale=locale)
         data["id"] = extract_id(data, id_spec, element)
         return [data]
 
@@ -490,7 +524,7 @@ def parse_items(html, query_spec):
         for el in elements:
             if not should_include(el, filter_spec):
                 continue
-            data = extract_variables(el, variables)
+            data = extract_variables(el, variables, locale=locale)
             data["id"] = extract_id(data, id_spec, el)
             items.append(data)
         return items
@@ -582,7 +616,7 @@ def fetch_all_items(definition, params):
 
     while page_num <= max_pages:
         print(f"  [{datetime.now()}] Fetching page {page_num}: {url}")
-        html = fetch_page(url)
+        html, locale = fetch_page(url)
 
         # Check expected structure on first page only
         if page_num == 1 and expect_selectors:
@@ -593,7 +627,7 @@ def fetch_all_items(definition, params):
                     f"Missing expected selector(s): {', '.join(missing)}"
                 )
 
-        items = parse_items(html, query_spec)
+        items = parse_items(html, query_spec, locale=locale)
 
         if not items:
             break
