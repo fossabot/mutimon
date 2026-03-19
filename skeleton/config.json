@@ -26,38 +26,27 @@
         "variables": {
           "title": {
             "selector": ".titleline > a",
-            "value": {
-              "type": "text"
-            }
+            "value": { "type": "text" }
           },
           "url": {
             "selector": ".titleline > a",
-            "value": {
-              "type": "attribute",
-              "name": "href"
-            }
+            "value": { "type": "attribute", "name": "href" }
           },
           "rank": {
             "selector": ".rank",
-            "value": {
-              "type": "text"
-            },
+            "value": { "type": "text" },
             "default": ""
           },
           "score": {
             "sibling": true,
             "selector": ".score",
-            "value": {
-              "type": "text"
-            },
+            "value": { "type": "text" },
             "default": "0 points"
           },
           "age": {
             "sibling": true,
             "selector": ".age a",
-            "value": {
-              "type": "text"
-            },
+            "value": { "type": "text" },
             "default": ""
           },
           "comments_url": {
@@ -72,6 +61,37 @@
           }
         }
       }
+    },
+    "coinmarketcap": {
+      "params": ["coin"],
+      "url": "https://coinmarketcap.com/currencies/{{coin}}/",
+      "query": {
+        "type": "single",
+        "selector": "[data-test='section-coin-stats']",
+        "expect": ["[data-test='text-cdp-price-display']"],
+        "id": {
+          "source": "coin",
+          "regex": "(.+)"
+        },
+        "variables": {
+          "name": {
+            "selector": "h1 span",
+            "value": { "type": "text" }
+          },
+          "symbol": {
+            "selector": "[data-role='coin-symbol']",
+            "value": { "type": "text" }
+          },
+          "price": {
+            "selector": "[data-test='text-cdp-price-display']",
+            "value": { "type": "text", "parse": "money" }
+          },
+          "price_display": {
+            "selector": "[data-test='text-cdp-price-display']",
+            "value": { "type": "text" }
+          }
+        }
+      }
     }
   },
   "rules": [
@@ -82,6 +102,33 @@
       "subject": "Hacker News: {{count}} new stories",
       "template": "./templates/hackernews",
       "email": "you@example.com"
+    },
+    {
+      "ref": "coinmarketcap",
+      "name": "bitcoin-price",
+      "schedule": "0 */4 * * *",
+      "subject": "Bitcoin price alert: {{count}} threshold(s) crossed",
+      "template": "./templates/coinmarketcap",
+      "email": "you@example.com",
+      "input": [
+        {
+          "params": { "coin": "bitcoin" },
+          "validator": [
+            { "test": "{{price}} >= 75000" },
+            { "test": "{{price}} >= 80000" },
+            { "test": "{{price}} >= 90000" },
+            { "test": "{{price}} >= 100000" }
+          ]
+        },
+        {
+          "params": { "coin": "bitcoin" },
+          "validator": [
+            { "test": "{{price}} <= 60000" },
+            { "test": "{{price}} <= 50000" },
+            { "test": "{{price}} <= 40000" }
+          ]
+        }
+      ]
     }
   ]
 }

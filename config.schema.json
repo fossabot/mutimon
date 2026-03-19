@@ -291,8 +291,8 @@
         },
         "parse": {
           "type": "string",
-          "enum": ["number"],
-          "description": "Parse the extracted string into a typed value. 'number': strips currency symbols, spaces, and percent signs, replaces comma with dot (European decimal format), and converts to float. Parsed values can be used in validator expressions."
+          "enum": ["number", "money"],
+          "description": "Parse the extracted string into a typed value. 'number': plain numeric parsing for integers and floats (strips commas as thousands separators, e.g. '1,234' -> 1234.0, '3.14' -> 3.14). 'money': locale-aware currency parsing via babel. Auto-detects page language from <html lang> or Content-Language header. Strips currency symbols and percent signs. Handles US format ($70,528.40), European format (11,8000 zl), and mixed formats. Parsed values can be used in validator expressions."
         }
       },
       "allOf": [

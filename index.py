@@ -356,18 +356,44 @@ def extract_value(element, value_spec, default=None, locale=None):
     # Apply type parsing if specified
     parse = value_spec.get("parse")
     if parse == "number":
-        raw = parse_number(raw, locale=locale)
+        raw = parse_number(raw)
+    elif parse == "money":
+        raw = parse_money(raw, locale=locale)
 
     return raw
 
 
-def parse_number(value, locale=None):
+def parse_number(value):
     """
-    Parse a string into a float using locale-aware number parsing via babel.
+    Parse a plain numeric string into a float.
+
+    Handles integers and floats with optional thousands separators.
+    Does NOT handle currency symbols — use parse="money" for prices.
+
+    Examples: "1234", "1,234", "3.14", "-0.84", "+5.2"
+    """
+    if isinstance(value, (int, float)):
+        return value
+    s = str(value).strip()
+    # Strip non-numeric chars except digits, dot, comma, minus, plus
+    s = re.sub(r"[^\d,.\-+]", "", s)
+    # Remove commas (thousands separators in plain numbers)
+    s = s.replace(",", "")
+    if not s:
+        return 0.0
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def parse_money(value, locale=None):
+    """
+    Parse a monetary string into a float using locale-aware parsing via babel.
 
     Strips currency symbols, whitespace, and percentage signs before parsing.
     Uses the page's detected locale to correctly interpret decimal and
-    thousands separators (e.g. "70,528.40" in en vs "11,8000" in pl).
+    thousands separators (e.g. "$70,528.40" in en vs "11,8000 zł" in pl).
 
     Falls back to a basic parser if babel fails.
     """

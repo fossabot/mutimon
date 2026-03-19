@@ -33,7 +33,7 @@ A generic, config-driven web scraper that monitors websites for changes and send
    - `query.type` — `"list"` (multiple items) or `"single"` (one item per page)
    - `query.selector` — CSS selector for item container
    - `query.variables` — each variable: `selector` + `value` (`type: "text"` or `type: "attribute"` with `name`)
-   - Optional: `pagination`, `filter`, `id`, `value.parse: "number"`, `value.regex`, `value.prefix`
+   - Optional: `pagination`, `filter`, `id`, `value.parse: "number"|"money"`, `value.regex`, `value.prefix`
    - Optional: `sibling: true` on a variable to search next sibling element
 3. Add a rule to `rules`:
    - `ref` — definition name
@@ -58,7 +58,7 @@ A generic, config-driven web scraper that monitors websites for changes and send
 
 ## Dependencies
 
-Python 3.12+ with: `requests`, `beautifulsoup4`, `pystache`, `croniter`, `numexpr`, `jsonschema`
+Python 3.12+ with: `requests`, `beautifulsoup4`, `pystache`, `croniter`, `numexpr`, `jsonschema`, `babel`
 
 Installed for both pyenv Python (3.12) and system Python (3.14) at `/usr/bin/python3`.
 

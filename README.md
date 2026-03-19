@@ -9,12 +9,12 @@ Designed to run as a cron job. Each rule has its own schedule (cron expression),
 ### Dependencies
 
 ```bash
-pip install requests beautifulsoup4 pystache croniter numexpr jsonschema
+pip install requests beautifulsoup4 pystache croniter numexpr jsonschema babel
 ```
 
 ### First run
 
-On the first run, the tool creates `~/.notifier/` with a skeleton config and an example Hacker News rule:
+On the first run, the tool creates `~/.notifier/` with a skeleton config and example rules (Hacker News + Bitcoin price alerts):
 
 ```bash
 python3 index.py
@@ -30,8 +30,10 @@ Edit `~/.notifier/config.json` with your SMTP credentials and scraping rules, th
 ```bash
 python3 index.py                  # process rules whose schedule is due
 python3 index.py --force          # ignore schedules, run all rules now
-python3 index.py --save-email     # save emails to files instead of sending
-python3 index.py --dry-run        # fetch and display data, no emails, no state changes
+python3 index.py --dry-run        # fetch and display data, bypass schedules, no state changes
+python3 index.py --save-email     # save emails to file instead of sending (emails are always saved to file, this skips SMTP)
+python3 index.py --validate       # validate config against schema and exit
+python3 index.py -q               # suppress all output (useful for cron)
 ```
 
 ### Cron example
@@ -109,6 +111,7 @@ Each definition describes how to fetch and parse data from a website.
 | `query.selector` | yes | CSS selector for item container(s) |
 | `query.id` | no | How to extract a unique ID per item (see below) |
 | `query.filter` | no | Filter to exclude items (see below) |
+| `query.expect` | no | List of CSS selectors that must exist on the page (see [Expected structure](#expected-structure)). Sends error email if missing. |
 | `query.variables` | yes | Named fields to extract (see below) |
 
 ### `rules` -- What to run
@@ -132,11 +135,12 @@ Each rule references a definition and can override params, email recipient, temp
 |-------|----------|-------------|
 | `ref` | yes | Name of the definition in `defs` |
 | `name` | yes | Unique rule name. Used for state file (`~/.notifier/data/<name>`) |
-| `schedule` | no | Cron expression for when to run (see [Schedule](#schedule)). If omitted, runs every time. |
+| `schedule` | no | Cron expression or array of expressions (see [Schedule](#schedule)). If omitted, runs every time. |
 | `subject` | yes | Mustache template for the email subject line |
 | `template` | yes | Path to the Mustache template file (relative to `~/.notifier/`) |
 | `email` | yes | Recipient email address |
-| `params` | no | Values for the definition's URL template variables |
+| `params` | no | Values for the definition's URL template variables. Used when `input` is not specified. |
+| `input` | no | One or more input entries with params and optional validators (see [Multiple inputs](#multiple-inputs)). Overrides `params`. |
 
 ## Variable extraction
 
@@ -164,7 +168,7 @@ Each variable in `query.variables` defines how to extract a value from a matched
 |-------|-------------|
 | `regex` | Extract a capture group from the raw value. Uses group(1) if available. |
 | `prefix` | String prepended to the final value. Useful for turning relative URLs into absolute. |
-| `parse` | Convert the extracted string to a typed value. Currently supports `"number"` -- strips currency symbols, spaces, percent signs, and converts European decimal format (comma) to float. Parsed values are used by validators. |
+| `parse` | Convert the extracted string to a typed value. `"number"`: plain numeric parsing for integers and floats, strips commas as thousands separators (e.g. `"1,234"` -> `1234`, `"3.14"` -> `3.14`). `"money"`: locale-aware currency parsing via [babel](https://babel.pocoo.org/), auto-detects page language from `<html lang>` or `Content-Language` header, strips currency symbols and percent signs, handles US (`$70,528.40`), European (`11,8000 zł`), and mixed (`11.800,50 €`) formats. Parsed values are used by validators. |
 
 ### Optional variable fields
 
@@ -202,7 +206,7 @@ The `id` field in the query spec controls how the scraper identifies items it ha
 }
 ```
 
-Takes the `url` variable value and extracts the ID using a regex.
+Takes the `url` variable value and extracts the ID using a regex. The `source` can reference either a variable name (from `variables`) or a param name (from `input`/`params`). When using `input`, params are merged into items before ID extraction, so `"source": "symbol"` works if `symbol` is a param.
 
 ### From an HTML attribute
 
@@ -230,7 +234,7 @@ The `filter` field excludes items based on CSS class:
 }
 ```
 
-This finds `.job__header-details--date` within each item and skips the item if it has the class `job__header-details--closed`.
+This finds `.job__header-details--date` within each item and skips the item if it has the class `job__header-details--closed`. Items where the filter selector doesn't match any element are also excluded.
 
 ## Expected structure
 
@@ -260,8 +264,8 @@ The `input` field allows a single rule to scrape multiple pages with different p
   "template": "./templates/bankier",
   "email": "you@example.com",
   "input": [
-    { "params": { "symbol": "BIOMAXIMA" }, "validator": "{{price}} > 10" },
-    { "params": { "symbol": "AGORA" }, "validator": "{{price}} > 9.5" },
+    { "params": { "symbol": "BIOMAXIMA" }, "validator": { "test": "{{price}} > 10" } },
+    { "params": { "symbol": "AGORA" }, "validator": { "test": "{{price}} > 9.5" } },
     { "params": { "symbol": "ASSECOPOL" } },
     { "params": { "symbol": "POLTREG" } }
   ]
@@ -278,7 +282,7 @@ Each input entry can have a `validator` object that filters extracted items. The
 
 ### `test` -- Numeric expression
 
-A [numexpr](https://numexpr.readthedocs.io/) expression with Mustache variable placeholders. Variables should use `"parse": "number"` in the definition so they're available as floats.
+A [numexpr](https://numexpr.readthedocs.io/) expression with Mustache variable placeholders. Variables should use `"parse": "number"` or `"parse": "money"` in the definition so they're available as floats.
 
 ```json
 "validator": {
@@ -310,6 +314,14 @@ Matches a Mustache-rendered variable value against a regex pattern. Uses `re.sea
   }
 }
 ```
+
+**Match condition fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `value` | yes | Mustache template string rendered against item variables |
+| `regex` | yes | Regex pattern tested with `re.search()` (matches anywhere unless anchored) |
+| `exist` | no | Whether the pattern should exist. Default `true`. Set to `false` to pass when the regex does NOT match. |
 
 Set `"exist": false` to pass when the pattern is **not found**. This is useful for detecting when something disappears from a page:
 
@@ -404,7 +416,7 @@ Finds the active page button and follows the link of the next one.
 
 ## Schedule
 
-Each rule can have a `schedule` field with a standard cron expression. The script is designed to be invoked frequently (e.g. every hour via system cron), and it decides internally which rules are due based on their schedule.
+Each rule can have a `schedule` field with a standard cron expression or an array of expressions (any match triggers the rule). The script is designed to be invoked frequently (e.g. every 5 minutes via system cron), and it decides internally which rules are due based on their schedule.
 
 The schedule uses [croniter](https://github.com/kiorky/croniter) to parse standard 5-field cron expressions:
 
@@ -427,6 +439,16 @@ The schedule uses [croniter](https://github.com/kiorky/croniter) to parse standa
 | `0 9 * * 1` | Every Monday at 9:00 |
 | `*/30 * * * *` | Every 30 minutes |
 | `0 8,20 * * *` | Twice daily at 8:00 and 20:00 |
+
+### Array of schedules
+
+When a single cron expression can't cover your needs, use an array. The rule runs if **any** expression matches:
+
+```json
+"schedule": ["0,30 9 * * *", "0 16 * * *"]
+```
+
+This runs at 9:00, 9:30, and 16:00 — something not expressible in a single 5-field cron string.
 
 ### How it works
 
@@ -478,9 +500,109 @@ The `subject` field in a rule is also a Mustache template with access to the sam
 
 1. On each run, all rules in the config are processed sequentially
 2. For each rule, the scraper fetches the URL (with pagination) and extracts items using CSS selectors
-3. Items are compared against the saved state in `~/.notifier/data/<rule_name>`
-4. New items (not seen before) trigger an email notification rendered from the Mustache template
-5. The current items are saved as the new state for the next run
+3. For `parse: "money"`, the page language is detected from `<html lang>` or the `Content-Language` header, and used for locale-aware currency parsing via [babel](https://babel.pocoo.org/)
+4. Items are compared against the saved state in `~/.notifier/data/<rule_name>`
+5. New items, or items that crossed a validator threshold (previously failed, now pass), trigger an email notification
+6. ALL items are saved in state with a `_valid` flag, so threshold crossings are detected on subsequent runs
+
+## Threshold crossing detection
+
+When a rule has validators, the scraper tracks whether each item passed or failed on the previous run. This enables re-notifications when a value crosses a threshold boundary:
+
+1. **Price rises to $75k** → validator `>= 75000` passes → notify, save `_valid: true`
+2. **Price drops to $72k** → validator fails → no notification, save `_valid: false`
+3. **Price rises to $76k** → validator passes, previous `_valid` was false → **notify again**
+4. **Price stays at $76k** → validator passes, previous `_valid` was true → no notification
+
+This works for both upward thresholds (`>=`) and downward thresholds (`<=`). The state file stores all fetched items (not just those passing the validator) with a `_valid` boolean.
+
+## Error handling
+
+The scraper sends error emails for four types of failures. The error email function (`send_error_email`) uses only Python's standard library (no third-party deps), so it works even when the error is caused by a missing dependency.
+
+| Error | Email subject | Behavior |
+|-------|--------------|----------|
+| Missing dependency (e.g. `import pystache` fails) | `[notifier] Missing dependency` | Sends traceback, exits |
+| Invalid config (schema validation fails) | `[notifier] Invalid configuration` | Sends all validation errors, exits |
+| HTML structure change (`expect` selectors missing) | `[notifier] HTML structure changed for '<rule>'` | Sends missing selectors, skips that input, continues other rules |
+| Fatal runtime crash (unhandled exception in `main()`) | `[notifier] Fatal error` | Sends full traceback |
+
+Error emails are sent to all unique recipient addresses found across all rules in the config.
+
+## Examples
+
+The `skeleton/` directory contains two ready-to-use examples that are copied to `~/.notifier/` on first run.
+
+### Hacker News — New stories
+
+Monitors the Hacker News front page for new stories. Uses pagination to fetch 2 pages (60 stories), sibling element extraction for scores, and `data-test` attribute-based IDs.
+
+**Files:** `skeleton/config.json` (hackernews def + rule), `skeleton/templates/hackernews`
+
+### Bitcoin price alerts — CoinMarketCap
+
+Monitors Bitcoin price on CoinMarketCap with threshold-based alerts. Demonstrates:
+
+- **Price going up**: notify when Bitcoin crosses above $75k, $80k, $90k, $100k
+- **Price going down**: notify when Bitcoin drops below $60k, $50k, $40k
+- **Threshold crossing detection**: if price rises above $75k (notify), drops to $72k (no notify), then rises back above $75k (notify again)
+- **Locale-aware money parsing**: `$70,528.40` is correctly parsed as `70528.40` using `parse: "money"` (US English format detected from `<html lang="en">`)
+- **Structure validation**: `expect` field checks that `[data-test='text-cdp-price-display']` exists on the page
+
+**Files:** `skeleton/config.json` (coinmarketcap def + rule), `skeleton/templates/coinmarketcap`
+
+The bitcoin rule uses two input entries — one for upward thresholds (`>=`), one for downward thresholds (`<=`):
+
+```json
+"input": [
+  {
+    "params": { "coin": "bitcoin" },
+    "validator": [
+      { "test": "{{price}} >= 75000" },
+      { "test": "{{price}} >= 80000" },
+      { "test": "{{price}} >= 100000" }
+    ]
+  },
+  {
+    "params": { "coin": "bitcoin" },
+    "validator": [
+      { "test": "{{price}} <= 60000" },
+      { "test": "{{price}} <= 50000" }
+    ]
+  }
+]
+```
+
+## Configuring with AI
+
+You can use an AI coding agent (Claude Code, OpenCode, Aider, etc.) to configure the tool. Here are example prompts you can copy, paste, and adjust:
+
+### Monitor a website for new content
+
+> Add a rule to monitor Hacker News (https://news.ycombinator.com) for new stories.
+> Extract the title, URL, score, and age. Send me an email every 6 hours
+> at user@example.com with the new stories. Read the README.md, config.schema.json,
+> and skeleton/config.json for reference.
+
+### Price alerts with thresholds
+
+> Add Bitcoin price monitoring using https://coinmarketcap.com/currencies/bitcoin/.
+> Notify me when the price crosses above $75,000 or drops below $60,000.
+> Check every 4 hours. Send alerts to user@example.com. Read the README.md,
+> config.schema.json, and skeleton/config.json for reference.
+
+### Monitor for a feature release
+
+> Monitor https://soloterm.com/download for Linux support. The page currently shows
+> "Coming soon" next to Linux. Notify me when that label disappears (use the match
+> validator with exist: false). Also add an expect check so I get an error email
+> if the page structure changes. Read the README.md and config.schema.json for reference.
+
+### Filter content with regex
+
+> Add a rule to monitor Hacker News for "Ask HN" posts only. Use the existing
+> hackernews definition with a match validator that filters titles starting with
+> "Ask HN". Read the README.md and config.schema.json for reference.
 
 ## License
 
