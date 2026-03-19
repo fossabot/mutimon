@@ -258,7 +258,9 @@ def should_run_now(rule):
     # Truncate to the start of the current minute
     now = datetime.now().replace(second=0, microsecond=0)
 
-    if not croniter.match(schedule, now):
+    # Support string or array of cron expressions (any match = run)
+    schedules = schedule if isinstance(schedule, list) else [schedule]
+    if not any(croniter.match(s, now) for s in schedules):
         return False
 
     # Prevent duplicate runs within the same minute

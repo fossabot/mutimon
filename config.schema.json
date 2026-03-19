@@ -325,14 +325,18 @@
           "examples": ["seo", "hackernews", "wikipedia"]
         },
         "schedule": {
-          "type": "string",
-          "description": "Cron expression (5 fields: minute hour day-of-month month day-of-week) controlling when this rule executes. The script checks if the current time matches this expression. If omitted, the rule runs on every invocation.",
-          "examples": [
-            "0 8 * * *",
-            "0 */6 * * *",
-            "30 9 * * 1",
-            "*/30 * * * *",
-            "0 8,20 * * *"
+          "description": "Cron expression(s) controlling when this rule executes. A single string or an array of strings (any match triggers the rule). If omitted, the rule runs on every invocation.",
+          "oneOf": [
+            {
+              "type": "string",
+              "examples": ["0 8 * * *", "0 */6 * * *", "0,30 9,16 * * *"]
+            },
+            {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 1,
+              "examples": [["0,30 9 * * *", "0 16 * * *"]]
+            }
           ]
         },
         "subject": {
