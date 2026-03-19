@@ -94,6 +94,7 @@ def send_error_email(subject, body):
 try:
     import requests
     import pystache
+    import numexpr
     from croniter import croniter
     from bs4 import BeautifulSoup
 except ImportError:
@@ -284,7 +285,41 @@ def extract_value(element, value_spec, default=None):
     if prefix:
         raw = prefix + raw
 
+    # Apply type parsing if specified
+    parse = value_spec.get("parse")
+    if parse == "number":
+        raw = parse_number(raw)
+
     return raw
+
+
+def parse_number(value):
+    """
+    Parse a string into a float, handling Polish/European number formatting.
+
+    Handles:
+      - Non-breaking spaces as thousands separators (e.g. "11 800")
+      - Comma as decimal separator (e.g. "11,8000")
+      - Currency suffixes (e.g. "11,8000 zł", "15 772")
+      - Percentage signs (e.g. "-0,84%")
+      - Plus/minus signs
+    """
+    if isinstance(value, (int, float)):
+        return value
+    s = str(value)
+    # Remove non-breaking spaces, regular spaces, currency symbols, %
+    s = s.replace("\xa0", "").replace(" ", "")
+    s = re.sub(r"[^\d,.\-+]", "", s)
+    # Replace comma with dot for decimal
+    # If there's both dot and comma, assume comma is decimal (European)
+    if "," in s and "." in s:
+        s = s.replace(".", "").replace(",", ".")
+    elif "," in s:
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return 0.0
 
 
 def extract_id(item_data, id_spec, element=None):
@@ -581,11 +616,65 @@ def save_email_to_file(rule_name, subject, body):
     print(f"  [{datetime.now()}] Email saved to {email_file}")
 
 
+def evaluate_validator(validator_expr, item):
+    """
+    Evaluate a validator expression against an item's variables.
+
+    The expression is a Mustache-templated numexpr string, e.g.:
+        "{{price}} > 9.5"
+        "({{price}} > 9.5) & ({{change_pct}} < 0)"
+
+    Variables are substituted from the item dict. Numeric variables are
+    passed as floats; non-numeric ones are skipped (will cause numexpr error).
+
+    Returns True if the expression evaluates to True, False otherwise.
+    """
+    if not validator_expr:
+        return True
+
+    try:
+        renderer = pystache.Renderer(escape=lambda u: u)
+        rendered = renderer.render(validator_expr, item)
+        result = bool(numexpr.evaluate(rendered))
+        return result
+    except Exception as e:
+        print(f"    Warning: Validator failed for '{validator_expr}': {e}")
+        return False
+
+
+def resolve_inputs(rule):
+    """
+    Resolve the input entries for a rule.
+
+    Returns a list of {params, validator} dicts.
+
+    Supports:
+      - No 'input' field: uses rule's 'params' directly, no validator
+      - 'input' as a single object: wraps in a list
+      - 'input' as an array: used as-is
+
+    Each input entry can have:
+      - 'params': dict of URL template variables
+      - 'validator': numexpr expression string with Mustache variables
+    """
+    input_spec = rule.get("input")
+    if input_spec is None:
+        return [{"params": rule.get("params", {}), "validator": None}]
+    if isinstance(input_spec, dict):
+        input_spec = [input_spec]
+    return [
+        {
+            "params": entry.get("params", rule.get("params", {})),
+            "validator": entry.get("validator"),
+        }
+        for entry in input_spec
+    ]
+
+
 def process_rule(config, rule, save_only=False):
     """Process a single rule: fetch, diff, notify."""
     rule_name = rule["name"]
     ref = rule["ref"]
-    params = rule.get("params", {})
     recipient = rule.get("email", config["email"]["server"]["email"])
     template_path = rule.get("template", "")
     subject_template = rule.get("subject", "")
@@ -598,14 +687,44 @@ def process_rule(config, rule, save_only=False):
         print(f"  Error: Definition '{ref}' not found in config.defs")
         return
 
-    # Fetch current items
-    try:
-        all_items = fetch_all_items(definition, params)
-    except Exception as e:
-        print(f"  [{datetime.now()}] Error fetching data: {e}")
-        return
+    # Resolve inputs (multiple pages with different params + validators)
+    inputs = resolve_inputs(rule)
+    all_items = []
 
-    print(f"  [{datetime.now()}] Found {len(all_items)} item(s).")
+    for input_entry in inputs:
+        params = input_entry["params"]
+        validator = input_entry["validator"]
+
+        try:
+            items = fetch_all_items(definition, params)
+        except Exception as e:
+            print(f"  [{datetime.now()}] Error fetching data for params {params}: {e}")
+            continue
+
+        # Apply validator if present
+        if validator:
+            before = len(items)
+            items = [item for item in items if evaluate_validator(validator, item)]
+            after = len(items)
+            if before != after:
+                print(
+                    f"  [{datetime.now()}] Validator filtered {before} -> {after} item(s)"
+                )
+
+        # Merge params into each item so templates can access them
+        # and re-derive ID if it references a param
+        id_spec = definition["query"].get("id")
+        for item in items:
+            for k, v in params.items():
+                if k not in item:
+                    item[k] = v
+            # Re-derive ID now that params are merged
+            if id_spec and not item.get("id"):
+                item["id"] = extract_id(item, id_spec)
+
+        all_items.extend(items)
+
+    print(f"  [{datetime.now()}] Found {len(all_items)} item(s) total.")
 
     if not all_items:
         print(f"  [{datetime.now()}] No items found. Nothing to do.")
@@ -622,11 +741,14 @@ def process_rule(config, rule, save_only=False):
     if new_items:
         print(f"  [{datetime.now()}] {len(new_items)} NEW item(s) detected!")
 
+        # Use first input's params as the base template context
+        base_params = inputs[0]["params"]
+
         # Load and render template
         template_str = load_template(template_path)
         if template_str:
             subject, body = render_email(
-                template_str, subject_template, new_items, params, definition
+                template_str, subject_template, new_items, base_params, definition
             )
             if save_only:
                 save_email_to_file(rule_name, subject, body)
@@ -685,21 +807,35 @@ def main():
 
         if args.dry_run:
             ref = rule["ref"]
-            params = rule.get("params", {})
             definition = config["defs"].get(ref)
             if not definition:
                 print(f"  Error: Definition '{ref}' not found")
                 continue
             print(f"\n[DRY RUN] Rule: '{rule_name}'")
-            try:
-                items = fetch_all_items(definition, params)
-                print(f"  Found {len(items)} item(s)")
-                for item in items[:3]:
-                    print(f"    id={item.get('id', '?')}: {item}")
-                if len(items) > 3:
-                    print(f"    ... and {len(items) - 3} more")
-            except Exception as e:
-                print(f"  Error: {e}")
+            inputs = resolve_inputs(rule)
+            all_items = []
+            for input_entry in inputs:
+                params = input_entry["params"]
+                validator = input_entry["validator"]
+                try:
+                    items = fetch_all_items(definition, params)
+                    if validator:
+                        items = [i for i in items if evaluate_validator(validator, i)]
+                    id_spec = definition["query"].get("id")
+                    for item in items:
+                        for k, v in params.items():
+                            if k not in item:
+                                item[k] = v
+                        if id_spec and not item.get("id"):
+                            item["id"] = extract_id(item, id_spec)
+                    all_items.extend(items)
+                except Exception as e:
+                    print(f"  Error for params {params}: {e}")
+            print(f"  Found {len(all_items)} item(s)")
+            for item in all_items[:3]:
+                print(f"    id={item.get('id', '?')}: {item}")
+            if len(all_items) > 3:
+                print(f"    ... and {len(all_items) - 3} more")
         else:
             process_rule(config, rule, save_only=args.save_email)
 

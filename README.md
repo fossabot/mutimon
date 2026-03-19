@@ -9,7 +9,7 @@ Designed to run as a cron job. Each rule has its own schedule (cron expression),
 ### Dependencies
 
 ```bash
-pip install requests beautifulsoup4 pystache croniter
+pip install requests beautifulsoup4 pystache croniter numexpr
 ```
 
 ### First run
@@ -162,6 +162,7 @@ Each variable in `query.variables` defines how to extract a value from a matched
 |-------|-------------|
 | `regex` | Extract a capture group from the raw value. Uses group(1) if available. |
 | `prefix` | String prepended to the final value. Useful for turning relative URLs into absolute. |
+| `parse` | Convert the extracted string to a typed value. Currently supports `"number"` -- strips currency symbols, spaces, percent signs, and converts European decimal format (comma) to float. Parsed values are used by validators. |
 
 ### Optional variable fields
 
@@ -228,6 +229,54 @@ The `filter` field excludes items based on CSS class:
 ```
 
 This finds `.job__header-details--date` within each item and skips the item if it has the class `job__header-details--closed`.
+
+## Multiple inputs
+
+The `input` field allows a single rule to scrape multiple pages with different parameters and combine the results into one email. This is useful for monitoring multiple items on the same website (e.g. multiple stock symbols).
+
+`input` can be a single object or an array:
+
+```json
+{
+  "ref": "bankier",
+  "name": "akcje",
+  "subject": "[bankier.pl] Zmiany Akcji",
+  "template": "./templates/bankier",
+  "email": "you@example.com",
+  "input": [
+    { "params": { "symbol": "BIOMAXIMA" }, "validator": "{{price}} > 10" },
+    { "params": { "symbol": "AGORA" }, "validator": "{{price}} > 9.5" },
+    { "params": { "symbol": "ASSECOPOL" } },
+    { "params": { "symbol": "POLTREG" } }
+  ]
+}
+```
+
+Each entry fetches the URL with its own `params`. If `input` is omitted, the rule's `params` field is used directly (backward compatible).
+
+Params from each input entry are merged into the extracted items, so they're available in templates (e.g. `{{symbol}}`).
+
+## Validators
+
+Each input entry can have a `validator` -- a [numexpr](https://numexpr.readthedocs.io/) expression with Mustache variable placeholders. Items where the expression evaluates to false are excluded from the results.
+
+```json
+"validator": "{{price}} > 9.5"
+```
+
+Variables referenced in the validator should use `"parse": "number"` in the definition so they're available as floats.
+
+### Supported operations
+
+| Operator | Example |
+|----------|---------|
+| Comparison | `{{price}} > 10`, `{{change_pct}} <= -5` |
+| AND | `({{price}} > 10) & ({{change_pct}} < 0)` |
+| OR | `({{price}} < 5) \| ({{price}} > 100)` |
+| Arithmetic | `{{price}} * {{quantity}} > 1000` |
+| Functions | `abs({{change_pct}}) > 3` |
+
+Use parentheses to group compound expressions. See the [numexpr documentation](https://numexpr.readthedocs.io/) for the full list of supported operations.
 
 ## Pagination
 
