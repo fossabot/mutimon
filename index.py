@@ -543,14 +543,37 @@ def find_next_page_url(html, pagination_spec, current_url):
     return None
 
 
+def check_expect(html, expect_selectors, url):
+    """
+    Verify that expected CSS selectors exist on the page.
+
+    Returns a list of missing selector strings. An empty list means
+    all expectations are met. Used to detect HTML structure changes
+    that would silently break scraping.
+    """
+    if not expect_selectors:
+        return []
+
+    soup = BeautifulSoup(html, "html.parser")
+    missing = []
+    for selector in expect_selectors:
+        if not soup.select_one(selector):
+            missing.append(selector)
+
+    return missing
+
+
 def fetch_all_items(definition, params):
     """
     Fetch all items across all pages for a definition.
     Returns list of item dicts.
+
+    Raises ValueError if 'expect' selectors are missing from the page.
     """
     pagination_spec = definition.get("pagination")
     query_spec = definition["query"]
     max_pages = pagination_spec.get("max_pages", 1) if pagination_spec else 1
+    expect_selectors = query_spec.get("expect")
     all_items = []
     page_num = 1
     url = render_url(definition["url"], params)
@@ -558,6 +581,16 @@ def fetch_all_items(definition, params):
     while page_num <= max_pages:
         print(f"  [{datetime.now()}] Fetching page {page_num}: {url}")
         html = fetch_page(url)
+
+        # Check expected structure on first page only
+        if page_num == 1 and expect_selectors:
+            missing = check_expect(html, expect_selectors, url)
+            if missing:
+                raise ValueError(
+                    f"HTML structure changed at {url}. "
+                    f"Missing expected selector(s): {', '.join(missing)}"
+                )
+
         items = parse_items(html, query_spec)
 
         if not items:
@@ -682,17 +715,24 @@ def evaluate_single_validator(validator, item, renderer):
             print(f"    Warning: Validator test failed for '{test_expr}': {e}")
             return False
 
-    # Evaluate "match" condition (regex match)
+    # Evaluate "match" condition(s) (regex match — AND logic)
     match_spec = validator.get("match")
     if match_spec:
-        try:
-            value = renderer.render(match_spec["value"], item)
-            pattern = match_spec["regex"]
-            if not re.search(pattern, value):
+        # Allow single object or array of match objects
+        match_list = match_spec if isinstance(match_spec, list) else [match_spec]
+        for m in match_list:
+            try:
+                value = renderer.render(m["value"], item)
+                pattern = m["regex"]
+                negate = m.get("negate", False)
+                matched = bool(re.search(pattern, value))
+                if negate:
+                    matched = not matched
+                if not matched:
+                    return False
+            except Exception as e:
+                print(f"    Warning: Validator match failed for '{m}': {e}")
                 return False
-        except Exception as e:
-            print(f"    Warning: Validator match failed for '{match_spec}': {e}")
-            return False
 
     return True
 
@@ -772,6 +812,15 @@ def process_rule(config, rule, save_only=False):
 
         try:
             items = fetch_all_items(definition, params)
+        except ValueError as e:
+            # Structure change detected — send error email
+            msg = str(e)
+            print(f"  [{datetime.now()}] {msg}")
+            send_error_email(
+                f"[notifier] HTML structure changed for '{rule_name}'",
+                f"Rule '{rule_name}' (ref: {ref}) detected a page structure change.\n\n{msg}",
+            )
+            continue
         except Exception as e:
             print(f"  [{datetime.now()}] Error fetching data for params {params}: {e}")
             continue

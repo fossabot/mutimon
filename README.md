@@ -232,6 +232,20 @@ The `filter` field excludes items based on CSS class:
 
 This finds `.job__header-details--date` within each item and skips the item if it has the class `job__header-details--closed`.
 
+## Expected structure
+
+The `expect` field on a query spec lists CSS selectors that must exist on the page. If any are missing, the scraper sends an error email about HTML structure changes instead of silently producing empty results.
+
+```json
+"query": {
+  "expect": [".text-center img[alt='Linux']", ".pagination"],
+  "selector": "...",
+  ...
+}
+```
+
+This is checked on the first page only. Useful for detecting when a website redesigns and your selectors break.
+
 ## Multiple inputs
 
 The `input` field allows a single rule to scrape multiple pages with different parameters and combine the results into one email. This is useful for monitoring multiple items on the same website (e.g. multiple stock symbols).
@@ -294,6 +308,29 @@ Matches a Mustache-rendered variable value against a regex pattern. Uses `re.sea
     "value": "{{title}}",
     "regex": "^Ask HN"
   }
+}
+```
+
+Set `"negate": true` to invert the match — the condition passes when the regex does **not** match. This is useful for detecting when something disappears from a page:
+
+```json
+"validator": {
+  "match": {
+    "value": "{{status}}",
+    "regex": "Coming soon",
+    "negate": true
+  }
+}
+```
+
+`match` can also be an array of match objects (AND logic — all must pass):
+
+```json
+"validator": {
+  "match": [
+    { "value": "{{platform}}", "regex": "Linux" },
+    { "value": "{{status}}", "regex": "Coming soon", "negate": true }
+  ]
 }
 ```
 
