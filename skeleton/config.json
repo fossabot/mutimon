@@ -40,8 +40,8 @@
           "score": {
             "sibling": true,
             "selector": ".score",
-            "value": { "type": "text" },
-            "default": "0 points"
+            "value": { "type": "text", "regex": "(\\d+)", "parse": "number" },
+            "default": "0"
           },
           "age": {
             "sibling": true,

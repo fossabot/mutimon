@@ -1,13 +1,13 @@
 Crypto Price Alert
-Checked at: {{now}}
+Checked at: {{ now }}
 
-{{count}} threshold(s) crossed:
+{{ count }} threshold(s) crossed:
 ============================================================
-{{#items}}
+{% for item in items %}
 
-{{index}}. {{name}} ({{symbol}})
-   Price: {{price_display}}
-   https://coinmarketcap.com/currencies/{{coin}}/
-{{/items}}
+{{ item.index }}. {{ item.name }} ({{ item.symbol }})
+   Price: {{ item.price_display }}
+   https://coinmarketcap.com/currencies/{{ item.coin }}/
+{% endfor %}
 
 ============================================================

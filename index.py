@@ -5,7 +5,7 @@ Generic web scraper and notifier.
 
 Reads scraping rules from ~/.notifier/config.json, extracts data from websites
 using CSS selectors, detects new items, and sends email notifications using
-Mustache templates. Processes all rules defined in config on each run.
+Liquid templates. Processes all rules defined in config on each run.
 
 Usage:
     index.py                  # process rules whose schedule is due
@@ -41,12 +41,12 @@ SKELETON_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "skelet
 
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
 
-_verbose = False
+verbose = False
 
 
 def log(msg):
     """Print a message only when --verbose is enabled."""
-    if _verbose:
+    if verbose:
         print(msg)
 
 # =========================================================
@@ -105,7 +105,7 @@ def send_error_email(subject, body):
 # === Third-party imports ===
 try:
     import requests
-    import pystache
+    from liquid import Environment as LiquidEnvironment
     import numexpr
     from babel import Locale
     from babel.numbers import parse_decimal
@@ -286,9 +286,12 @@ def should_run_now(rule):
     return True
 
 
+liquid = LiquidEnvironment()
+
+
 def render_url(url_template, params):
-    """Render a URL template with Mustache-style params."""
-    return pystache.render(url_template, params)
+    """Render a URL template with Liquid params."""
+    return liquid.from_string(url_template).render(**params)
 
 
 def detect_language(html, response_headers=None):
@@ -390,11 +393,14 @@ def parse_number(value):
     # Remove commas (thousands separators in plain numbers)
     s = s.replace(",", "")
     if not s:
-        return 0.0
+        return 0
     try:
-        return float(s)
+        result = float(s)
+        if result == int(result):
+            return int(result)
+        return result
     except (ValueError, TypeError):
-        return 0.0
+        return 0
 
 
 def parse_money(value, locale=None):
@@ -681,7 +687,7 @@ def fetch_all_items(definition, params):
 
 
 def load_template(template_path):
-    """Load a Mustache template file."""
+    """Load a Liquid template file."""
     # Template paths in config are relative to the config file directory
     if not os.path.isabs(template_path):
         template_path = os.path.join(NOTIFIER_DIR, template_path)
@@ -696,7 +702,7 @@ def load_template(template_path):
 
 def render_email(template_str, subject_template, items, params, definition):
     """
-    Render the email body and subject using Mustache templates.
+    Render the email body and subject using Liquid templates.
 
     Context includes:
       - all params (e.g. query)
@@ -720,9 +726,8 @@ def render_email(template_str, subject_template, items, params, definition):
     context["now"] = str(datetime.now())
     context["search_url"] = search_url
 
-    renderer = pystache.Renderer(escape=lambda u: u)
-    body = renderer.render(template_str, context)
-    subject = renderer.render(subject_template, context) if subject_template else ""
+    body = liquid.from_string(template_str).render(**context)
+    subject = liquid.from_string(subject_template).render(**context) if subject_template else ""
 
     return subject, body
 
@@ -761,18 +766,18 @@ def save_email_to_file(rule_name, subject, body):
     log(f"  [{datetime.now()}] Email saved to {email_file}")
 
 
-def evaluate_single_validator(validator, item, renderer):
+def evaluate_single_validator(validator, item):
     """
     Evaluate a single validator object against an item's variables.
 
     The validator is a dict with optional keys (AND logic — all must pass):
 
-      "test": numexpr expression with Mustache variables, e.g.:
-          "{{price}} > 9.5"
-          "({{price}} > 80) & ({{change_pct}} < 0)"
+      "test": numexpr expression with Liquid variables, e.g.:
+          "{{ price }} > 9.5"
+          "({{ price }} > 80) & ({{ change_pct }} < 0)"
 
       "match": regex match against a rendered variable, e.g.:
-          {"value": "{{title}}", "regex": "^Ask HN"}
+          {"value": "{{ title }}", "regex": "^Ask HN"}
 
     Returns True if all specified conditions pass, False otherwise.
     """
@@ -780,7 +785,7 @@ def evaluate_single_validator(validator, item, renderer):
     test_expr = validator.get("test")
     if test_expr:
         try:
-            rendered = renderer.render(test_expr, item)
+            rendered = liquid.from_string(test_expr).render(**item)
             if not bool(numexpr.evaluate(rendered)):
                 return False
         except Exception as e:
@@ -794,7 +799,7 @@ def evaluate_single_validator(validator, item, renderer):
         match_list = match_spec if isinstance(match_spec, list) else [match_spec]
         for m in match_list:
             try:
-                value = renderer.render(m["value"], item)
+                value = liquid.from_string(m["value"]).render(**item)
                 pattern = m["regex"]
                 should_exist = m.get("exist", True)
                 matched = bool(re.search(pattern, value))
@@ -816,17 +821,30 @@ def evaluate_validator(validator, item):
     Accepts:
       - None/empty: always passes
       - dict: a single validator (AND logic within)
-      - list: multiple validators (OR logic — any passing means the item is included)
+      - list: multiple validators with two-tier logic:
+          - Validators with "require": true must ALL pass (AND)
+          - Remaining validators use OR logic (at least one must pass)
+          - If only required validators exist, OR check is skipped
     """
     if not validator:
         return True
 
-    renderer = pystache.Renderer(escape=lambda u: u)
-
     if isinstance(validator, list):
-        return any(evaluate_single_validator(v, item, renderer) for v in validator)
+        required = [v for v in validator if v.get("require")]
+        optional = [v for v in validator if not v.get("require")]
 
-    return evaluate_single_validator(validator, item, renderer)
+        # All required validators must pass
+        for v in required:
+            if not evaluate_single_validator(v, item):
+                return False
+
+        # At least one optional validator must pass (if any exist)
+        if optional:
+            return any(evaluate_single_validator(v, item) for v in optional)
+
+        return True
+
+    return evaluate_single_validator(validator, item)
 
 
 def resolve_inputs(rule):
@@ -842,7 +860,7 @@ def resolve_inputs(rule):
 
     Each input entry can have:
       - 'params': dict of URL template variables
-      - 'validator': numexpr expression string with Mustache variables
+      - 'validator': numexpr expression string with Liquid variables
     """
     input_spec = rule.get("input")
     if input_spec is None:
@@ -1015,8 +1033,8 @@ def main():
     )
     args = parser.parse_args()
 
-    global _verbose
-    _verbose = args.verbose
+    global verbose
+    verbose = args.verbose
 
     if args.quiet:
         sys.stdout = open(os.devnull, "w")

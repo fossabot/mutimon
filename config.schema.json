@@ -73,7 +73,7 @@
         "url": {
           "type": "string",
           "format": "uri-template",
-          "description": "URL to fetch. Supports Mustache template variables from rule params, e.g. 'https://example.com/search?q={{query}}'. Variables are enclosed in double curly braces.",
+          "description": "URL to fetch. Supports Liquid template variables from rule params, e.g. 'https://example.com/search?q={{query}}'. Variables are enclosed in double curly braces.",
           "examples": [
             "https://news.ycombinator.com",
             "https://useme.com/pl/jobs/?query={{query}}"
@@ -341,7 +341,7 @@
         },
         "subject": {
           "type": "string",
-          "description": "Mustache template for the email subject line. Available variables: {{count}} (number of new items), {{now}} (current datetime), {{search_url}} (the fetched URL), all rule params (e.g. {{query}}), and all extracted variables.",
+          "description": "Liquid template for the email subject line. Available variables: {{count}} (number of new items), {{now}} (current datetime), {{search_url}} (the fetched URL), all rule params (e.g. {{query}}), and all extracted variables.",
           "examples": [
             "[useme.com] {{count}} new offer(s) for '{{query}}'",
             "Hacker News: {{count}} new stories"
@@ -349,7 +349,7 @@
         },
         "template": {
           "type": "string",
-          "description": "Path to the Mustache template file for the email body, relative to ~/.notifier/. The template has access to: {{count}}, {{now}}, {{search_url}}, {{#items}}...{{/items}} loop with {{index}} and all extracted variables, plus all rule params.",
+          "description": "Path to the Liquid template file for the email body, relative to ~/.notifier/. The template has access to: {{count}}, {{now}}, {{search_url}}, {% for item in items %}...{% endfor %} loop with {{ item.index }} and all extracted variables, plus all rule params.",
           "examples": ["./templates/useme", "./templates/hackernews"]
         },
         "email": {
@@ -399,7 +399,7 @@
           ]
         },
         "validator": {
-          "description": "Filter extracted items. A single validator object (AND logic within), or an array of validators (OR logic — item passes if any validator passes).",
+          "description": "Filter extracted items. A single validator object (AND logic within), or an array of validators (OR logic — item passes if any validator passes). In an array, validators with 'require: true' must ALL pass; at least one non-required validator must also pass.",
           "oneOf": [
             { "$ref": "#/$defs/validator" },
             {
@@ -413,12 +413,17 @@
     },
     "validator": {
       "type": "object",
-      "description": "Validates extracted items. All specified conditions must pass (AND logic). Items that fail are excluded from results.",
+      "description": "Validates extracted items. All specified conditions within a single validator must pass (AND logic). In an array of validators, those with 'require: true' must ALL pass, and at least one non-required validator must also pass (OR logic among them).",
       "additionalProperties": false,
       "properties": {
+        "require": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, this validator must always pass (AND logic with other validators). Non-required validators in the same array use OR logic. Use this for baseline filters (e.g. minimum score) combined with threshold alerts."
+        },
         "test": {
           "type": "string",
-          "description": "A numexpr expression with Mustache variable placeholders. Variables with 'parse: number' are available as floats. The expression must evaluate to true for the item to be included. Use & for AND, | for OR, and parentheses for grouping.",
+          "description": "A numexpr expression with Liquid variable placeholders. Variables with 'parse: number' are available as floats. The expression must evaluate to true for the item to be included. Use & for AND, | for OR, and parentheses for grouping.",
           "examples": [
             "{{price}} > 9.5",
             "{{price}} > 10",
@@ -440,13 +445,13 @@
     },
     "matchCondition": {
       "type": "object",
-      "description": "A single regex match condition against a Mustache-rendered variable value.",
+      "description": "A single regex match condition against a Liquid-rendered variable value.",
       "required": ["value", "regex"],
       "additionalProperties": false,
       "properties": {
         "value": {
           "type": "string",
-          "description": "Mustache template string to render against item variables. The rendered result is tested against the regex.",
+          "description": "Liquid template string to render against item variables. The rendered result is tested against the regex.",
           "examples": ["{{title}}", "{{company}}", "{{status}}"]
         },
         "regex": {

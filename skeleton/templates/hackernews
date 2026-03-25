@@ -1,14 +1,14 @@
 Hacker News - New Stories
-Checked at: {{now}}
+Checked at: {{ now }}
 
-Number of new stories: {{count}}
+Number of new stories: {{ count }}
 ============================================================
-{{#items}}
+{% for item in items %}
 
-{{rank}} {{title}}
-     Score: {{score}} | {{age}}
-     URL:   {{url}}
-     HN:    {{comments_url}}
-{{/items}}
+{{ item.rank }} {{ item.title }}
+     Score: {{ item.score }} point{% if item.score != 1 %}s{% endif %} | {{ item.age }}
+     URL:   {{ item.url }}
+     HN:    {{ item.comments_url }}
+{% endfor %}
 
 ============================================================

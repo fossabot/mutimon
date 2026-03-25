@@ -1,6 +1,6 @@
 # Notifier
 
-A generic, config-driven web scraper that monitors websites for changes and sends email notifications. Define what to scrape using CSS selectors in a JSON config file, and format notifications with Mustache templates.
+A generic, config-driven web scraper that monitors websites for changes and sends email notifications. Define what to scrape using CSS selectors in a JSON config file, and format notifications with Liquid templates.
 
 Designed to run as a cron job. Each rule has its own schedule (cron expression), so the script can be invoked frequently (e.g. every hour) and each rule runs only when its schedule is due.
 
@@ -9,7 +9,7 @@ Designed to run as a cron job. Each rule has its own schedule (cron expression),
 ### Dependencies
 
 ```bash
-pip install requests beautifulsoup4 pystache croniter numexpr jsonschema babel
+pip install requests beautifulsoup4 python-liquid croniter numexpr jsonschema babel
 ```
 
 ### First run
@@ -54,7 +54,7 @@ Run the script periodically via system cron. Each rule's `schedule` field contro
 ```
 ~/.notifier/
   config.json              # main configuration
-  templates/               # Mustache email templates
+  templates/               # Liquid email templates
     hackernews
   data/                    # state files (tracked items per rule)
     hackernews
@@ -105,7 +105,7 @@ Each definition describes how to fetch and parse data from a website.
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `url` | yes | URL to fetch. Supports Mustache variables from rule params, e.g. `https://example.com?q={{query}}` |
+| `url` | yes | URL to fetch. Supports Liquid variables from rule params, e.g. `https://example.com?q={{query}}` |
 | `params` | no | List of parameter names used in the URL template |
 | `pagination` | no | Pagination config (see below) |
 | `query.type` | yes | `"list"` (multiple items) or `"single"` (one item) |
@@ -137,8 +137,8 @@ Each rule references a definition and can override params, email recipient, temp
 | `ref` | yes | Name of the definition in `defs` |
 | `name` | yes | Unique rule name. Used for state file (`~/.notifier/data/<name>`) |
 | `schedule` | no | Cron expression or array of expressions (see [Schedule](#schedule)). If omitted, runs every time. |
-| `subject` | yes | Mustache template for the email subject line |
-| `template` | yes | Path to the Mustache template file (relative to `~/.notifier/`) |
+| `subject` | yes | Liquid template for the email subject line |
+| `template` | yes | Path to the Liquid template file (relative to `~/.notifier/`) |
 | `email` | yes | Recipient email address |
 | `params` | no | Values for the definition's URL template variables. Used when `input` is not specified. |
 | `input` | no | One or more input entries with params and optional validators (see [Multiple inputs](#multiple-inputs)). Overrides `params`. |
@@ -283,7 +283,7 @@ Each input entry can have a `validator` object that filters extracted items. The
 
 ### `test` -- Numeric expression
 
-A [numexpr](https://numexpr.readthedocs.io/) expression with Mustache variable placeholders. Variables should use `"parse": "number"` or `"parse": "money"` in the definition so they're available as floats.
+A [numexpr](https://numexpr.readthedocs.io/) expression with Liquid variable placeholders. Variables should use `"parse": "number"` or `"parse": "money"` in the definition so they're available as floats.
 
 ```json
 "validator": {
@@ -305,7 +305,7 @@ Use parentheses to group compound expressions. See the [numexpr documentation](h
 
 ### `match` -- Regex match
 
-Matches a Mustache-rendered variable value against a regex pattern. Uses `re.search()` so the pattern matches anywhere unless anchored with `^` or `$`.
+Matches a Liquid-rendered variable value against a regex pattern. Uses `re.search()` so the pattern matches anywhere unless anchored with `^` or `$`.
 
 ```json
 "validator": {
@@ -320,7 +320,7 @@ Matches a Mustache-rendered variable value against a regex pattern. Uses `re.sea
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `value` | yes | Mustache template string rendered against item variables |
+| `value` | yes | Liquid template string rendered against item variables |
 | `regex` | yes | Regex pattern tested with `re.search()` (matches anywhere unless anchored) |
 | `exist` | no | Whether the pattern should exist. Default `true`. Set to `false` to pass when the regex does NOT match. |
 
@@ -374,6 +374,23 @@ The validator can also be an array. The item is included if **any** validator in
 ```
 
 Each entry in the array is a full validator object that can use `test`, `match`, or both.
+
+### Required validators (`require`)
+
+In a validator array, set `"require": true` to make a validator mandatory. Required validators must ALL pass (AND logic), while the remaining validators use OR logic (at least one must pass). If only required validators exist, the OR check is skipped.
+
+This is useful for combining a baseline filter with threshold alerts:
+
+```json
+"validator": [
+  { "require": true, "test": "{{score_num}} > 50" },
+  { "test": "{{price}} > 75000" },
+  { "test": "{{price}} > 80000" },
+  { "test": "{{price}} > 100000" }
+]
+```
+
+The `require` validator acts as a gate — items must pass it before the OR thresholds are even considered.
 
 ## Pagination
 
@@ -464,38 +481,40 @@ The script is designed to be invoked periodically by system cron (e.g. every 5 m
 
 ## Email templates
 
-Templates use [Mustache](https://mustache.github.io/) syntax via [pystache](https://github.com/defunkt/pystache). The following variables are available:
+Templates use [Liquid](https://shopify.github.io/liquid/) syntax via [python-liquid](https://github.com/jg-rp/liquid). The following variables are available:
 
 | Variable | Description |
 |----------|-------------|
-| `{{count}}` | Number of new items |
-| `{{now}}` | Current date and time |
-| `{{search_url}}` | The rendered URL from the definition |
-| `{{#items}}...{{/items}}` | Loop over new items |
-| `{{index}}` | 1-based position within the items list |
-| Any rule `params` | e.g. `{{query}}` |
-| Any extracted variable | e.g. `{{title}}`, `{{url}}`, `{{score}}` |
+| `{{ count }}` | Number of new items |
+| `{{ now }}` | Current date and time |
+| `{{ search_url }}` | The rendered URL from the definition |
+| `{% for item in items %}` | Loop over new items |
+| `{{ item.index }}` | 1-based position within the items list |
+| Any rule `params` | e.g. `{{ query }}` |
+| Any extracted variable | e.g. `{{ item.title }}`, `{{ item.url }}`, `{{ item.score }}` |
+
+Liquid supports conditionals, filters, and logic — see the [Liquid docs](https://shopify.github.io/liquid/).
 
 ### Example template
 
 ```
 Hacker News - New Stories
-Checked at: {{now}}
+Checked at: {{ now }}
 
-Number of new stories: {{count}}
+Number of new stories: {{ count }}
 ============================================================
-{{#items}}
+{% for item in items %}
 
-{{rank}} {{title}}
-     Score: {{score}} | {{age}}
-     URL:   {{url}}
-     HN:    {{comments_url}}
-{{/items}}
+{{ item.rank }} {{ item.title }}
+     Score: {{ item.score }} point{% if item.score != 1 %}s{% endif %} | {{ item.age }}
+     URL:   {{ item.url }}
+     HN:    {{ item.comments_url }}
+{% endfor %}
 
 ============================================================
 ```
 
-The `subject` field in a rule is also a Mustache template with access to the same variables.
+The `subject` field in a rule is also a Liquid template with access to the same variables.
 
 ## How it works
 
@@ -523,7 +542,7 @@ The scraper sends error emails for four types of failures. The error email funct
 
 | Error | Email subject | Behavior |
 |-------|--------------|----------|
-| Missing dependency (e.g. `import pystache` fails) | `[notifier] Missing dependency` | Sends traceback, exits |
+| Missing dependency (e.g. `import liquid` fails) | `[notifier] Missing dependency` | Sends traceback, exits |
 | Invalid config (schema validation fails) | `[notifier] Invalid configuration` | Sends all validation errors, exits |
 | HTML structure change (`expect` selectors missing) | `[notifier] HTML structure changed for '<rule>'` | Sends missing selectors, skips that input, continues other rules |
 | Fatal runtime crash (unhandled exception in `main()`) | `[notifier] Fatal error` | Sends full traceback |

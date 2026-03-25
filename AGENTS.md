@@ -10,7 +10,7 @@ A generic, config-driven web scraper that monitors websites for changes and send
 - `config.json` — **the user's config is at `~/.notifier/config.json`**, the one in the project dir is an example
 - `config.schema.json` — JSON Schema for validation, used by `--validate` and on every run
 - `skeleton/` — default config + templates copied to `~/.notifier/` on first run
-- `templates/` — example Mustache templates (useme, bankier, hackernews)
+- `templates/` — example Liquid templates (useme, bankier, hackernews)
 - `run.sh` — cron entry point, sets up pyenv without loading full `.bashrc`
 - `pyrightconfig.json` — pyright config pointing to pyenv's site-packages
 
@@ -29,7 +29,7 @@ A generic, config-driven web scraper that monitors websites for changes and send
 
 1. Inspect the target page HTML (use browser DevTools or `python3 -c "import requests; ..."`)
 2. Add a definition to `defs` in `~/.notifier/config.json`:
-   - `url` — supports `{{param}}` Mustache variables
+   - `url` — supports `{{param}}` Liquid variables
    - `query.type` — `"list"` (multiple items) or `"single"` (one item per page)
    - `query.selector` — CSS selector for item container
    - `query.variables` — each variable: `selector` + `value` (`type: "text"` or `type: "attribute"` with `name`)
@@ -39,11 +39,11 @@ A generic, config-driven web scraper that monitors websites for changes and send
    - `ref` — definition name
    - `name` — unique, used as state filename
    - `schedule` — cron expression (e.g. `"0 8 * * *"`)
-   - `subject` — Mustache template for email subject
+   - `subject` — Liquid template for email subject
    - `template` — path to body template relative to `~/.notifier/`
    - `email` — recipient
    - `params` or `input` — parameter values (input supports array + validators)
-4. Create a Mustache template file. Available vars: `{{count}}`, `{{now}}`, `{{search_url}}`, `{{#items}}...{{/items}}` with `{{index}}` and all extracted variables
+4. Create a Liquid template file. Available vars: `{{ count }}`, `{{ now }}`, `{{ search_url }}`, `{% for item in items %}...{% endfor %}` with `{{ item.index }}` and all extracted variables
 5. Validate: `python3 index.py --validate`
 
 ## CLI flags
@@ -59,7 +59,7 @@ A generic, config-driven web scraper that monitors websites for changes and send
 
 ## Dependencies
 
-Python 3.12+ with: `requests`, `beautifulsoup4`, `pystache`, `croniter`, `numexpr`, `jsonschema`, `babel`
+Python 3.12+ with: `requests`, `beautifulsoup4`, `python-liquid`, `croniter`, `numexpr`, `jsonschema`, `babel`
 
 Installed for both pyenv Python (3.12) and system Python (3.14) at `/usr/bin/python3`.
 
