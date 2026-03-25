@@ -49,11 +49,12 @@ A generic, config-driven web scraper that monitors websites for changes and send
 ## CLI flags
 
 ```
---validate    validate config and exit
---dry-run     fetch and display data, no emails, no state changes
---save-email  save emails to file instead of sending
---force       ignore schedules, run all rules
--q, --quiet   suppress all output
+--validate      validate config and exit
+--dry-run       fetch and display data, no emails, no state changes
+--save-email    save emails to file instead of sending
+--force         ignore schedules, run all rules
+-v, --verbose   show detailed progress output
+-q, --quiet     suppress all output including errors
 ```
 
 ## Dependencies
