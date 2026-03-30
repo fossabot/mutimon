@@ -317,12 +317,15 @@ def detect_language(html, response_headers=None):
         return Locale.parse("en")
 
 
-def fetch_page(url):
+def fetch_page(url, user_agent=None, is_xml=False):
     """Fetch a single page and return its HTML and detected locale."""
-    headers = {"User-Agent": USER_AGENT}
+    headers = {"User-Agent": user_agent or USER_AGENT}
     resp = requests.get(url, headers=headers, timeout=30)
     resp.raise_for_status()
-    locale = detect_language(resp.text, resp.headers)
+    if is_xml:
+        locale = Locale.parse("en")
+    else:
+        locale = detect_language(resp.text, resp.headers)
     return resp.text, locale
 
 
@@ -537,13 +540,13 @@ def extract_variables(element, variables_spec, locale=None):
     return data
 
 
-def parse_items(html, query_spec, locale=None):
+def parse_items(html, query_spec, locale=None, bs_parser="html.parser"):
     """
     Parse items from HTML based on query specification.
 
     Returns a list of dicts with extracted variables + 'id' field.
     """
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(html, bs_parser)
     query_type = query_spec["type"]
     selector = query_spec["selector"]
     variables = query_spec.get("variables", {})
@@ -621,7 +624,7 @@ def find_next_page_url(html, pagination_spec, current_url):
     return None
 
 
-def check_expect(html, expect_selectors, url):
+def check_expect(html, expect_selectors, url, bs_parser="html.parser"):
     """
     Verify that expected CSS selectors exist on the page.
 
@@ -632,7 +635,7 @@ def check_expect(html, expect_selectors, url):
     if not expect_selectors:
         return []
 
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(html, bs_parser)
     missing = []
     for selector in expect_selectors:
         if not soup.select_one(selector):
@@ -652,24 +655,26 @@ def fetch_all_items(definition, params):
     query_spec = definition["query"]
     max_pages = pagination_spec.get("max_pages", 1) if pagination_spec else 1
     expect_selectors = query_spec.get("expect")
+    bs_parser = "xml" if definition.get("format") == "xml" else "html.parser"
+    user_agent = definition.get("userAgent")
     all_items = []
     page_num = 1
     url = render_url(definition["url"], params)
 
     while page_num <= max_pages:
         log(f"  [{datetime.now()}] Fetching page {page_num}: {url}")
-        html, locale = fetch_page(url)
+        html, locale = fetch_page(url, user_agent=user_agent, is_xml=bs_parser == "xml")
 
         # Check expected structure on first page only
         if page_num == 1 and expect_selectors:
-            missing = check_expect(html, expect_selectors, url)
+            missing = check_expect(html, expect_selectors, url, bs_parser=bs_parser)
             if missing:
                 raise ValueError(
                     f"HTML structure changed at {url}. "
                     f"Missing expected selector(s): {', '.join(missing)}"
                 )
 
-        items = parse_items(html, query_spec, locale=locale)
+        items = parse_items(html, query_spec, locale=locale, bs_parser=bs_parser)
 
         if not items:
             break

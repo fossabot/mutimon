@@ -70,6 +70,16 @@
       "required": ["url", "query"],
       "additionalProperties": false,
       "properties": {
+        "format": {
+          "type": "string",
+          "enum": ["html", "xml"],
+          "default": "html",
+          "description": "'html': parse the response as HTML using the default html.parser (default). 'xml': parse the response as XML using the lxml XML parser. Use this for RSS/Atom feeds or any XML document where CSS selectors target XML elements."
+        },
+        "userAgent": {
+          "type": "string",
+          "description": "Custom User-Agent header for HTTP requests. If omitted, the default browser-like User-Agent is used. Useful for RSS feeds or APIs that require a specific User-Agent."
+        },
         "url": {
           "type": "string",
           "format": "uri-template",

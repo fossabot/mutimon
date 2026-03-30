@@ -17,6 +17,8 @@ A generic, config-driven web scraper that monitors websites for changes and send
 ## Architecture
 
 1. `defs` — reusable scraping definitions (URL + CSS selectors + pagination)
+   - `format` — `"html"` (default) or `"xml"` for RSS/Atom feeds and XML documents (uses lxml XML parser)
+   - `userAgent` — optional custom User-Agent header for HTTP requests
 2. `rules` — reference a def, add schedule (cron expr), email template, recipient
 3. `input` — optional array on a rule for scraping multiple pages with different params (e.g. multiple stock symbols)
 4. `validator` — optional filter on each input entry, object or array:
@@ -30,8 +32,10 @@ A generic, config-driven web scraper that monitors websites for changes and send
 1. Inspect the target page HTML (use browser DevTools or `python3 -c "import requests; ..."`)
 2. Add a definition to `defs` in `~/.notifier/config.json`:
    - `url` — supports `{{param}}` Liquid variables
+   - `format` — `"html"` (default) or `"xml"` for RSS/Atom feeds and XML documents
+   - `userAgent` — optional custom User-Agent string (some feeds block default agents)
    - `query.type` — `"list"` (multiple items) or `"single"` (one item per page)
-   - `query.selector` — CSS selector for item container
+   - `query.selector` — CSS selector for item container (for XML: element names like `item`, `entry`)
    - `query.variables` — each variable: `selector` + `value` (`type: "text"` or `type: "attribute"` with `name`)
    - Optional: `pagination`, `filter`, `id`, `value.parse: "number"|"money"`, `value.regex`, `value.prefix`
    - Optional: `sibling: true` on a variable to search next sibling element
@@ -59,7 +63,7 @@ A generic, config-driven web scraper that monitors websites for changes and send
 
 ## Dependencies
 
-Python 3.12+ with: `requests`, `beautifulsoup4`, `python-liquid`, `croniter`, `numexpr`, `jsonschema`, `babel`
+Python 3.12+ with: `requests`, `beautifulsoup4`, `lxml`, `python-liquid`, `croniter`, `numexpr`, `jsonschema`, `babel`
 
 Installed for both pyenv Python (3.12) and system Python (3.14) at `/usr/bin/python3`.
 

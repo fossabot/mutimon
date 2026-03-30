@@ -92,6 +92,43 @@
           }
         }
       }
+    },
+    "reddit-atom": {
+      "params": ["subreddit"],
+      "format": "xml",
+      "userAgent": "Liferea/1.15.6 (Linux; https://lzone.de/liferea/) AppleWebKit (KHTML, like Gecko)",
+      "url": "https://www.reddit.com/r/{{subreddit}}.rss",
+      "query": {
+        "type": "list",
+        "selector": "entry",
+        "id": {
+          "source": "entry_id"
+        },
+        "variables": {
+          "title": {
+            "selector": "title",
+            "value": { "type": "text" }
+          },
+          "url": {
+            "selector": "link",
+            "value": { "type": "attribute", "name": "href" }
+          },
+          "entry_id": {
+            "selector": "id",
+            "value": { "type": "text" }
+          },
+          "date": {
+            "selector": "updated",
+            "value": { "type": "text" },
+            "default": ""
+          },
+          "author": {
+            "selector": "author name",
+            "value": { "type": "text" },
+            "default": ""
+          }
+        }
+      }
     }
   },
   "rules": [
@@ -129,6 +166,17 @@
           ]
         }
       ]
+    },
+    {
+      "ref": "reddit-atom",
+      "name": "r-scheme",
+      "schedule": "0 */6 * * *",
+      "subject": "[r/scheme] {{count}} new post(s)",
+      "template": "./templates/reddit",
+      "email": "you@example.com",
+      "params": {
+        "subreddit": "scheme"
+      }
     }
   ]
 }

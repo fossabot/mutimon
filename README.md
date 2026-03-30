@@ -9,7 +9,7 @@ Designed to run as a cron job. Each rule has its own schedule (cron expression),
 ### Dependencies
 
 ```bash
-pip install requests beautifulsoup4 python-liquid croniter numexpr jsonschema babel
+pip install requests beautifulsoup4 lxml python-liquid croniter numexpr jsonschema babel
 ```
 
 ### First run
@@ -106,10 +106,12 @@ Each definition describes how to fetch and parse data from a website.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `url` | yes | URL to fetch. Supports Liquid variables from rule params, e.g. `https://example.com?q={{query}}` |
+| `format` | no | `"html"` (default) or `"xml"`. Use `"xml"` for RSS/Atom feeds or any XML document. Switches BeautifulSoup to the lxml XML parser (requires `lxml`). |
+| `userAgent` | no | Custom User-Agent header. If omitted, a default browser-like User-Agent is used. Useful for RSS feeds or APIs that require a specific User-Agent. |
 | `params` | no | List of parameter names used in the URL template |
 | `pagination` | no | Pagination config (see below) |
 | `query.type` | yes | `"list"` (multiple items) or `"single"` (one item) |
-| `query.selector` | yes | CSS selector for item container(s) |
+| `query.selector` | yes | CSS selector for item container(s). For XML, use XML element names (e.g. `item` for RSS, `entry` for Atom). |
 | `query.id` | no | How to extract a unique ID per item (see below) |
 | `query.filter` | no | Filter to exclude items (see below) |
 | `query.expect` | no | List of CSS selectors that must exist on the page (see [Expected structure](#expected-structure)). Sends error email if missing. |
@@ -593,6 +595,38 @@ The bitcoin rule uses two input entries — one for upward thresholds (`>=`), on
 ]
 ```
 
+### Reddit subreddit — RSS/Atom feed
+
+Monitors a Reddit subreddit via its Atom feed (Reddit serves `.rss` URLs as Atom XML). Demonstrates:
+
+- **XML format**: `format: "xml"` switches from HTML to XML parsing, so CSS selectors target XML elements (`entry`, `title`, `link`) instead of HTML
+- **Custom User-Agent**: Reddit blocks default scrapers, so a Liferea RSS reader User-Agent is used
+- **Parameterized subreddit**: the `subreddit` param lets the same definition monitor any subreddit
+- **Atom-specific selectors**: `entry` for items, `link[href]` for URLs (Atom uses `<link href="..."/>` instead of `<link>text</link>`)
+
+**Files:** `skeleton/config.json` (reddit-atom def + rule), `skeleton/templates/reddit`
+
+```json
+"reddit-atom": {
+  "params": ["subreddit"],
+  "format": "xml",
+  "userAgent": "Liferea/1.15.6 (Linux; https://lzone.de/liferea/) AppleWebKit (KHTML, like Gecko)",
+  "url": "https://www.reddit.com/r/{{subreddit}}.rss",
+  "query": {
+    "type": "list",
+    "selector": "entry",
+    "id": { "source": "entry_id" },
+    "variables": {
+      "title":    { "selector": "title", "value": { "type": "text" } },
+      "url":      { "selector": "link", "value": { "type": "attribute", "name": "href" } },
+      "entry_id": { "selector": "id", "value": { "type": "text" } },
+      "date":     { "selector": "updated", "value": { "type": "text" }, "default": "" },
+      "author":   { "selector": "author name", "value": { "type": "text" }, "default": "" }
+    }
+  }
+}
+```
+
 ## Configuring with AI
 
 You can use an AI coding agent (Claude Code, OpenCode, Aider, etc.) to configure the tool. Here are example prompts you can copy, paste, and adjust:
@@ -617,6 +651,14 @@ You can use an AI coding agent (Claude Code, OpenCode, Aider, etc.) to configure
 > "Coming soon" next to Linux. Notify me when that label disappears (use the match
 > validator with exist: false). Also add an expect check so I get an error email
 > if the page structure changes. Read the README.md and config.schema.json for reference.
+
+### Monitor an RSS/Atom feed
+
+> Add a rule to monitor the r/scheme subreddit via its RSS feed at
+> https://www.reddit.com/r/scheme.rss. Reddit serves Atom XML, so use
+> format "xml" and a Liferea User-Agent. Extract the title, URL, author,
+> and date. Check every 6 hours and email me at user@example.com.
+> Read the README.md, config.schema.json, and skeleton/config.json for reference.
 
 ### Filter content with regex
 
