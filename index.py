@@ -10,6 +10,7 @@ Liquid templates. Processes all rules defined in config on each run.
 Usage:
     index.py                  # process rules whose schedule is due
     index.py --force          # ignore schedules and run all rules
+    index.py --force <rule>   # ignore schedule and run a specific rule
     index.py --dry-run        # fetch and display data without sending emails
     index.py --save-email     # save emails to file instead of sending
     index.py --validate       # validate config and exit
@@ -1334,8 +1335,12 @@ def main():
     )
     parser.add_argument(
         "--force",
-        action="store_true",
-        help="Ignore schedules and run all rules immediately",
+        nargs="?",
+        const=True,
+        default=False,
+        metavar="RULE",
+        help="Ignore schedules. Without argument: run all rules. "
+        "With a rule name: run only that rule.",
     )
     parser.add_argument(
         "--validate",
@@ -1380,12 +1385,28 @@ def main():
         log("No rules to process.")
         return
 
+    force_all = args.force is True
+    force_rule = args.force if isinstance(args.force, str) else None
+
+    if force_rule:
+        rule_names = [r["name"] for r in rules]
+        if force_rule not in rule_names:
+            print(
+                f"Error: Rule '{force_rule}' not found. "
+                f"Available rules: {', '.join(rule_names)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
     log(f"Processing {len(rules)} rule(s)...")
 
     for rule in rules:
         rule_name = rule["name"]
 
-        if not args.force and not args.dry_run and not should_run_now(rule):
+        if force_rule and rule_name != force_rule:
+            continue
+
+        if not force_all and not force_rule and not args.dry_run and not should_run_now(rule):
             schedule = rule.get("schedule", "")
             log(f"Skipping '{rule_name}' (schedule: {schedule})")
             continue

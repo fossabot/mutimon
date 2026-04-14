@@ -28,13 +28,14 @@ Edit `~/.notifier/config.json` with your SMTP credentials and scraping rules, th
 ## Usage
 
 ```bash
-python3 index.py                  # process rules; only prints notifications and errors
-python3 index.py --force          # ignore schedules, run all rules now
-python3 index.py --dry-run        # fetch and display data, bypass schedules, no state changes
-python3 index.py --save-email     # save email to file instead of sending via SMTP
-python3 index.py --validate       # validate config against schema and exit
-python3 index.py -v, --verbose    # show detailed progress (page fetches, counts, skipped rules)
-python3 index.py -q, --quiet      # suppress all output including errors
+python3 index.py                    # process rules; only prints notifications and errors
+python3 index.py --force            # ignore schedules, run all rules now
+python3 index.py --force <rule>     # ignore schedule, run only the named rule
+python3 index.py --dry-run          # fetch and display data, bypass schedules, no state changes
+python3 index.py --save-email       # save email to file instead of sending via SMTP
+python3 index.py --validate         # validate config against schema and exit
+python3 index.py -v, --verbose      # show detailed progress (page fetches, counts, skipped rules)
+python3 index.py -q, --quiet        # suppress all output including errors
 ```
 
 ### Cron example
