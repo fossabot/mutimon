@@ -536,26 +536,57 @@
     },
     "matchCondition": {
       "type": "object",
-      "description": "A single regex match condition against a Liquid-rendered variable value.",
-      "required": ["value", "regex"],
+      "description": "A match condition against a variable value. Use 'value' for Liquid-rendered strings or 'var' for raw variable lookup (preserves lists). Condition: 'regex' for pattern matching, 'include' for list membership, or 'exclude' for list exclusion.",
       "additionalProperties": false,
       "properties": {
         "value": {
           "type": "string",
-          "description": "Liquid template string to render against item variables. The rendered result is tested against the regex.",
+          "description": "Liquid template string to render against item variables. The rendered result is tested against the condition.",
           "examples": ["{{title}}", "{{company}}", "{{status}}"]
+        },
+        "var": {
+          "type": "string",
+          "description": "Direct variable name lookup — returns the raw value (preserves lists from collect: true). Use instead of 'value' when you need exact element matching on list variables.",
+          "examples": ["skills", "title", "platform"]
         },
         "regex": {
           "type": "string",
-          "description": "Regex pattern to match against the rendered value. Uses re.search() so it matches anywhere in the string unless anchored with ^ or $.",
+          "description": "Regex pattern to match against the value. Uses re.search() so it matches anywhere in the string unless anchored with ^ or $. For list values, elements are joined with ', ' before matching.",
           "examples": ["^Ask HN", "BIOMAXIMA", "Coming soon"]
+        },
+        "include": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "List of strings — passes if any string is found. For list values (via 'var'), checks exact element membership. For strings, checks substring match (or exact match with 'strict: true').",
+          "examples": [["Linux", "macOS"]]
+        },
+        "exclude": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "List of strings — passes if none are found. For list values (via 'var'), checks exact element membership. For strings, checks substring match (or exact match with 'strict: true').",
+          "examples": [["Angular", "C#", ".NET"]]
+        },
+        "strict": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, include/exclude use exact string equality instead of substring match. Only affects string values — list values always use exact element matching. Default is false."
         },
         "exist": {
           "type": "boolean",
           "default": true,
-          "description": "Whether the regex pattern should exist in the value. Set to false to detect when something disappears from a page (e.g. a 'Coming soon' label being removed). Default is true (pattern must match)."
+          "description": "Whether the regex pattern should exist in the value. Set to false to detect when something disappears from a page. Default is true (pattern must match). Not needed with 'exclude' which is already inverted."
         }
-      }
+      },
+      "oneOf": [
+        { "required": ["value", "regex"] },
+        { "required": ["value", "include"] },
+        { "required": ["value", "exclude"] },
+        { "required": ["var", "regex"] },
+        { "required": ["var", "include"] },
+        { "required": ["var", "exclude"] }
+      ]
     }
   }
 }

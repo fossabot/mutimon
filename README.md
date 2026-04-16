@@ -468,12 +468,12 @@ Use parentheses to group compound expressions. See the [numexpr documentation](h
 
 ### `match` -- Regex match
 
-Matches a Liquid-rendered variable value against a regex pattern. Uses `re.search()` so the pattern matches anywhere unless anchored with `^` or `$`.
+Matches a variable value against a regex pattern. Uses `re.search()` so the pattern matches anywhere unless anchored with `^` or `$`.
 
 ```json
 "validator": {
   "match": {
-    "value": "{{title}}",
+    "var": "title",
     "regex": "^Ask HN"
   }
 }
@@ -483,18 +483,35 @@ Matches a Liquid-rendered variable value against a regex pattern. Uses `re.searc
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `value` | yes | Liquid template string rendered against item variables |
-| `regex` | yes | Regex pattern tested with `re.search()` (matches anywhere unless anchored) |
-| `exist` | no | Whether the pattern should exist. Default `true`. Set to `false` to pass when the regex does NOT match. |
+| `var` | one of `var` or `value` | Direct variable name — returns the raw value, preserving lists from `collect: true` |
+| `value` | one of `var` or `value` | Liquid template string rendered against item variables (always produces a string) |
+| `regex` | one of `regex`, `include`, or `exclude` | Regex pattern tested with `re.search()` (matches anywhere unless anchored). For list values, elements are joined with `", "` before matching. |
+| `include` | one of `regex`, `include`, or `exclude` | Array of strings — passes if any string is found (see below) |
+| `exclude` | one of `regex`, `include`, or `exclude` | Array of strings — passes if none are found (see below) |
+| `strict` | no | When `true`, `include`/`exclude` use exact string equality instead of substring match. Only affects string values — list values always use exact element matching. Default `false`. |
+| `exist` | no | Whether the regex pattern should exist. Default `true`. Set to `false` to pass when the regex does NOT match. Not needed with `exclude`. |
 
 Set `"exist": false` to pass when the pattern is **not found**. This is useful for detecting when something disappears from a page:
 
 ```json
 "validator": {
   "match": {
-    "value": "{{status}}",
+    "var": "status",
     "regex": "Coming soon",
     "exist": false
+  }
+}
+```
+
+### `include` / `exclude` -- String list match
+
+Use `include` or `exclude` instead of `regex` when checking against a list of plain strings. Use `var` to reference the variable directly — when the variable is a list (from `collect: true`), each element is compared as an exact match, so `"Java"` will match the skill `"Java"` but not `"JavaScript"`. For plain string values, substring matching is used by default (use `strict: true` for exact matching).
+
+```json
+"validator": {
+  "match": {
+    "var": "skills",
+    "exclude": ["Angular", "C#", ".NET", "Java"]
   }
 }
 ```
@@ -504,8 +521,8 @@ Set `"exist": false` to pass when the pattern is **not found**. This is useful f
 ```json
 "validator": {
   "match": [
-    { "value": "{{platform}}", "regex": "Linux" },
-    { "value": "{{status}}", "regex": "Coming soon", "exist": false }
+    { "var": "platform", "regex": "Linux" },
+    { "var": "status", "regex": "Coming soon", "exist": false }
   ]
 }
 ```
@@ -518,7 +535,7 @@ Both conditions must pass (AND logic within a single object):
 "validator": {
   "test": "{{price}} > 80",
   "match": {
-    "value": "{{company}}",
+    "var": "company",
     "regex": "Asseco"
   }
 }

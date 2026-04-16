@@ -1116,17 +1116,37 @@ def evaluate_single_validator(validator, item):
             )
             return False
 
-    # Evaluate "match" condition(s) (regex match — AND logic)
+    # Evaluate "match" condition(s) (regex/include/exclude match — AND logic)
     match_spec = validator.get("match")
     if match_spec:
         # Allow single object or array of match objects
         match_list = match_spec if isinstance(match_spec, list) else [match_spec]
         for m in match_list:
             try:
-                value = liquid.from_string(m["value"]).render(**item)
-                pattern = m["regex"]
+                if "var" in m:
+                    value = item.get(m["var"], "")
+                else:
+                    value = liquid.from_string(m["value"]).render(**item)
                 should_exist = m.get("exist", True)
-                matched = bool(re.search(pattern, value))
+                strict = m.get("strict", False)
+                if "exclude" in m:
+                    if isinstance(value, list):
+                        matched = not any(s in value for s in m["exclude"])
+                    elif strict:
+                        matched = not any(s == value for s in m["exclude"])
+                    else:
+                        matched = not any(s in value for s in m["exclude"])
+                elif "include" in m:
+                    if isinstance(value, list):
+                        matched = any(s in value for s in m["include"])
+                    elif strict:
+                        matched = any(s == value for s in m["include"])
+                    else:
+                        matched = any(s in value for s in m["include"])
+                else:
+                    if isinstance(value, list):
+                        value = ", ".join(value)
+                    matched = bool(re.search(m["regex"], value))
                 if not should_exist:
                     matched = not matched
                 if not matched:
