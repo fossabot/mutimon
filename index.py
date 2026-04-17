@@ -462,14 +462,41 @@ def make_command_tag(cmd_name, template_str, arg_names):
     return DynamicCommandTag
 
 
+def replace_regex(value, pattern, replacement):
+    """Built-in filter: regex replacement on a string value."""
+    return re.sub(pattern, replacement, str(value))
+
+
+def make_filter(expression, env):
+    """Create a Liquid filter function from a filter expression string.
+
+    The expression uses standard Liquid filter syntax, e.g.:
+        "replace_regex: '\\s+', ' ' | strip"
+
+    Compiled once into a template: {{ __value__ | <expression> }}
+    """
+    template = env.from_string("{{ __value__ | " + expression + " }}")
+
+    def filter_func(value):
+        return template.render(__value__=value)
+
+    return filter_func
+
+
 def setup_liquid(config):
-    """Register custom command tags from config into the Liquid environment."""
+    """Register custom command tags and filters from config into the Liquid environment."""
     global liquid
     commands = config.get("defs", {}).get("commands", {})
     for cmd_name, cmd_def in commands.items():
         template_str = cmd_def["template"]
         arg_names = cmd_def.get("args", [])
         liquid.add_tag(make_command_tag(cmd_name, template_str, arg_names))
+    # Register built-in base filters
+    liquid.add_filter("replace_regex", replace_regex)
+    # Register user-defined filters from config (Liquid filter expressions)
+    filters = config.get("defs", {}).get("filters", {})
+    for filter_name, filter_expr in filters.items():
+        liquid.add_filter(filter_name, make_filter(filter_expr, liquid))
 
 
 def render_url(url_template, params):

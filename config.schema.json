@@ -71,12 +71,22 @@
               }
             }
           }
+        },
+        "filters": {
+          "type": "object",
+          "description": "Custom Liquid filters. Each key becomes a filter usable as {{ value | name }} in templates. Defined as Liquid filter expression strings using built-in or other custom filters. A built-in 'replace_regex' filter is available for regex substitution.",
+          "additionalProperties": {
+            "type": "string",
+            "description": "Liquid filter expression string. Uses standard Liquid pipe syntax. The input value is piped through the expression. Example: \"replace_regex: '\\\\s+', ' ' | strip\"",
+            "examples": ["replace_regex: '\\s+', ' ' | strip", "downcase | strip"]
+          }
         }
       },
       "additionalProperties": {
         "$ref": "#/$defs/definition"
       },
       "patternProperties": {
+        "^filters$": { "$ref": "#/properties/defs/properties/filters" },
         "^validators$": {
           "type": "object",
           "description": "Reusable validator definitions. Each key is a validator name that can be referenced by rules via {\"@id\": \"name\"} in a validator field.",

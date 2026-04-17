@@ -696,6 +696,38 @@ This filters out any items where the `date` field is older than 7 days (604800 s
 }
 ```
 
+## Filters
+
+Custom Liquid filters defined in `defs.filters`. Each key becomes a filter usable as `{{ value | name }}` in templates. Filters are defined using standard Liquid filter expression syntax — the input value is piped through the expression chain.
+
+### Defining filters
+
+```json
+"defs": {
+  "filters": {
+    "clean": "replace_regex: '\\s+', ' ' | strip"
+  }
+}
+```
+
+The expression uses standard Liquid pipe syntax. Built-in Liquid filters (`strip`, `downcase`, `replace`, etc.) and the additional `replace_regex` filter are available:
+
+| Filter | Description |
+|--------|-------------|
+| `replace_regex: pattern, replacement` | Regex substitution (supports backreferences `\1`, `\2`, etc.) |
+
+Filters can be chained with `|` — the output of one becomes the input of the next. Custom filters can also reference other custom filters defined earlier.
+
+### Using filters
+
+Use filters with the standard Liquid pipe syntax in any template:
+
+```
+{{ item.snippet | clean }}
+```
+
+The `clean` filter above collapses all whitespace (newlines, tabs, spaces) into a single space and trims leading/trailing whitespace.
+
 ## Pagination
 
 Two pagination types are supported:

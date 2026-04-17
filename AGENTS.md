@@ -25,6 +25,7 @@ A generic, config-driven web scraper that monitors websites for changes and send
    - `format` — `"html"` (default) or `"xml"` for RSS/Atom feeds and XML documents (uses lxml XML parser)
    - `userAgent` — optional custom User-Agent header for HTTP requests
    - `defs.commands` — reusable Liquid tag commands (e.g. `{% fresh date 604800 %}`, `{% today date %}`), usable in validator `test`/`match` expressions
+   - `defs.filters` — custom Liquid filters defined as Liquid filter expression strings (e.g. `"clean": "replace_regex: '\\s+', ' ' | strip"`), usable as `{{ value | name }}` in templates. Built-in `replace_regex` filter available for regex substitution.
 2. `rules` — reference a def, add schedule (cron expr), email template, recipient
 3. `input` — optional array on a rule for scraping multiple pages with different params (e.g. multiple stock symbols)
 4. `validator` — optional filter on each input entry, object or array:
