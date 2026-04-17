@@ -116,6 +116,7 @@ Each definition describes how to fetch and parse data from a website. The option
 | `query.id` | no | How to extract a unique ID per item (see below) |
 | `query.filter` | no | Filter to exclude items (see below) |
 | `query.expect` | no | List of CSS selectors that must exist on the page (see [Expected structure](#expected-structure)). Sends error email if missing. |
+| `query.reject` | no | List of CSS selectors that indicate no real results (see [Reject selectors](#reject-selectors)). Returns 0 items if any match. |
 | `query.variables` | yes | Named fields to extract (see below) |
 
 ### `rules` -- What to run
@@ -413,6 +414,20 @@ The `expect` field on a query spec lists CSS selectors that must exist on the pa
 ```
 
 This is checked on the first page only. Useful for detecting when a website redesigns and your selectors break.
+
+## Reject selectors
+
+The `reject` field is the inverse of `expect` — it lists CSS selectors that indicate the page has **no real results**. If any selector matches, the page returns 0 items. This is useful for sites that show recommended or unrelated content when there are no actual matches for the search query.
+
+```json
+"query": {
+  "reject": ["nfj-no-offers-found-header"],
+  "selector": "...",
+  ...
+}
+```
+
+For example, nofluffjobs.com shows a "Brak wyników wyszukiwania" message and recommended jobs when a language has no remote offers. The `reject` selector detects the no-results element and prevents those recommendations from being treated as real results.
 
 ## Multiple inputs
 

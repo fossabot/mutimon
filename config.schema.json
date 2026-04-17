@@ -206,6 +206,14 @@
           },
           "examples": [[".text-center img[alt='Linux']"], ["article.job", ".pagination"]]
         },
+        "reject": {
+          "type": "array",
+          "description": "List of CSS selectors that indicate the page has no real results (e.g. a 'no results' message). If any selector matches, the page is skipped and returns 0 items. Useful for sites that show recommended/unrelated content when there are no actual matches.",
+          "items": {
+            "type": "string"
+          },
+          "examples": [["nfj-no-offers-found-header"]]
+        },
         "filter": {
           "$ref": "#/$defs/filter"
         },

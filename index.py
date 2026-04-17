@@ -277,6 +277,8 @@ def _validate_css_selectors(config):
             check_selector(query["selector"], f"defs.{def_name}.query.selector")
         for expect_sel in query.get("expect", []):
             check_selector(expect_sel, f"defs.{def_name}.query.expect")
+        for reject_sel in query.get("reject", []):
+            check_selector(reject_sel, f"defs.{def_name}.query.reject")
         filter_spec = query.get("filter", {})
         if filter_spec.get("selector"):
             check_selector(
@@ -985,6 +987,15 @@ def fetch_all_items(definition, params):
                     f"HTML structure changed at {url}. "
                     f"Missing expected selector(s): {', '.join(missing)}"
                 )
+
+        # Check reject selectors — if any match, skip this page (no real results)
+        reject_selectors = query_spec.get("reject")
+        if reject_selectors:
+            soup = BeautifulSoup(html, bs_parser)
+            for sel in reject_selectors:
+                if soup.select_one(sel):
+                    log(f"  Reject selector matched: {sel} — skipping results")
+                    return all_items
 
         items = parse_items(html, query_spec, locale=locale, bs_parser=bs_parser)
 

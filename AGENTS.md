@@ -53,6 +53,7 @@ A generic, config-driven web scraper that monitors websites for changes and send
    - `query.selector` — CSS selector for item container (for XML: element names like `item`, `entry`)
    - `query.variables` — each variable: `selector` + `value` (`type: "text"` or `type: "attribute"` with `name`)
    - Optional: `pagination`, `filter`, `id`, `value.parse: "number"|"money"|"list"|"json"`, `value.regex`, `value.prefix`
+   - Optional: `query.reject` — array of CSS selectors; if any match, the page returns 0 items (e.g. a "no results" indicator that hides recommended/unrelated content)
    - Optional: `sibling: true` on a variable to search next sibling element
    - Optional: `collect: true` on a variable to extract ALL matching elements as a list (use `{% for %}` in templates)
    - Optional: `selector: ":self"` to reference the container element itself (e.g. when container is `<a>` and you need its `href`)
