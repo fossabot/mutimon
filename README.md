@@ -1032,6 +1032,15 @@ Or with any AI assistant — just paste the contents of the file as context alon
 > `parse: "json"` with a JMESPath query to extract city and URL from the
 > embedded JSON. Read the README.md and config.schema.json for reference.
 
+## Acknowledge
+
+The logo was created as a combination of clipart from OpenClipart:
+* [Time Attendance](https://openclipart.org/detail/315307/time-attendance) by petr.gajdusek
+* [Notification logo](https://openclipart.org/detail/271120/notification-logo) by laftello
+* [Internet Graphic Chart 02](https://openclipart.org/detail/239851/1brooverview) by cset_paper
+
+It also uses [Lovelo](https://www.dafontfree.io/lovelo-font-free/) font.
+
 ## Name Origin
 
 **Mutimon** is a concise Latin portmanteau formed from mutare (“to change”) + monere (“to warn / monitor”).
