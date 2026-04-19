@@ -1,12 +1,8 @@
 """Tests for process_rule, fetch, and higher-level integration."""
 
-import json
-import os
-from datetime import datetime
 from unittest import mock
 
 import pytest
-from bs4 import BeautifulSoup
 
 from mutimon import main
 
@@ -345,7 +341,6 @@ class TestProcessRule:
             with mock.patch("mutimon.main.send_email") as mock_send:
                 main.process_rule(config, rule)
                 # Should send only 1 item, not 2 (deduped)
-                args = mock_send.call_args
                 # Check the body contains the item only once
                 assert mock_send.called
 

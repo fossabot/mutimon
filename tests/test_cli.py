@@ -6,7 +6,6 @@ import subprocess
 import sys
 import tempfile
 
-import pytest
 
 
 _TEST_HOME = tempfile.mkdtemp(prefix="mutimon-test-")

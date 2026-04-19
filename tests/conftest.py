@@ -1,9 +1,6 @@
 """Shared fixtures for mutimon tests."""
 
 import json
-import os
-import shutil
-import tempfile
 
 import pytest
 

@@ -1,11 +1,8 @@
 """Unit tests for mutimon core functions."""
 
-import hashlib
 import json
 import os
-import re
-import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest import mock
 
 import pytest
