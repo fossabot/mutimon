@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [master, devel]
+  pull_request:
+    branches: [master, devel]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check src/
+
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e . pytest pytest-cov
+      - run: python -m pytest tests/ -v --cov=mutimon --cov-report=term --cov-report=lcov:coverage.lcov
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: coverage.lcov
+
+  coveralls:
+    needs: test
+    if: github.event_name == 'push' && github.repository == 'jcubic/mutimon'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          name: coverage-report
+      - uses: coverallsapp/github-action@v2
+        with:
+          file: coverage.lcov

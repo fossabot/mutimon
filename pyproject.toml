@@ -48,3 +48,12 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 mutimon = ["skeleton/**/*", "config.schema.json", "AI_GUIDE.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["mutimon"]
+
+[tool.coverage.report]
+show_missing = true
