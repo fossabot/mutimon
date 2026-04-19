@@ -15,11 +15,24 @@ Designed to run as a cron job. Each rule has its own schedule (cron expression),
 
 ## Installation
 
+### From PyPI
+
 ```bash
-pip install .
+pip install mutimon
 ```
 
 This installs the `mon` command.
+
+### From source
+
+```bash
+git clone https://github.com/jcubic/mutimon.git
+cd mutimon
+pip install .
+```
+
+This installs the `mon` command from the local source, including all dependencies.
+
 
 ### First run
 
@@ -43,6 +56,8 @@ mon --force <rule>     # ignore schedule, run only the named rule
 mon --dry-run          # fetch and display data, bypass schedules, no state changes
 mon --save-email       # save email to file instead of sending via SMTP
 mon --validate         # validate config against schema and exit
+mon --list             # list all rule names (usable with --force <rule>)
+mon --ai-guide         # print the path to the AI instruction file for adding websites
 mon -v, --verbose      # show detailed progress (page fetches, counts, skipped rules)
 mon -q, --quiet        # suppress all output including errors
 ```
