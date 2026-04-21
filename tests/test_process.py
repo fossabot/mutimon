@@ -412,6 +412,27 @@ class TestRunFunction:
         out = capsys.readouterr().out
         assert "AI_GUIDE.md" in out
 
+    def test_cron_default(self, capsys):
+        with mock.patch("sys.argv", ["mon", "--cron"]):
+            main.run()
+        out = capsys.readouterr().out
+        assert "*/5 * * * *" in out
+        assert "mon -q" in out
+        assert "mutimon.log" in out
+
+    def test_cron_custom_schedule(self, capsys):
+        with mock.patch("sys.argv", ["mon", "--cron", "0 8 * * *"]):
+            main.run()
+        out = capsys.readouterr().out
+        assert "0 8 * * *" in out
+
+    def test_cron_fallback_to_argv(self, capsys):
+        with mock.patch("sys.argv", ["mon", "--cron"]):
+            with mock.patch("shutil.which", return_value=None):
+                main.run()
+        out = capsys.readouterr().out
+        assert "mon -q" in out
+
     def test_skeleton_email_rejected(self, tmp_mutimon, write_config):
         config = {
             "email": {
