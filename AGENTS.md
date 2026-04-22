@@ -42,7 +42,8 @@ A generic, config-driven web scraper that monitors websites for changes and send
    - Object with both test+match = AND logic
    - `match.exist: false` passes when pattern does NOT match (useful for detecting something disappearing from a page)
 6. Threshold crossing — all fetched items are saved with a `_valid` flag. When an item passes a validator after previously failing (or vice versa), it triggers a re-notification. Enables alerts like "price went back above $75k after dipping".
-7. `parse: "json"` + `query` (JMESPath) — extracts structured data from embedded JSON. Variables are processed AFTER HTML extraction and ID assignment (so `{{id}}` is available in `query.path`). Parsed JSON is cached per page via module-level `_json_cache` keyed by `(id(soup), selector)`, cleared at start of each `parse_items()` call.
+7. `track` — state-machine threshold tracking (alternative to `validator`, mutually exclusive). Evaluates states top-down (first match wins), saves state index, notifies on every state transition. States can be `"silent": true` to save state without notifying. Template vars: `{{ item._state_name }}`, `{{ item._prev_state_name }}`, `{{ item._value }}`.
+8. `parse: "json"` + `query` (JMESPath) — extracts structured data from embedded JSON. Variables are processed AFTER HTML extraction and ID assignment (so `{{id}}` is available in `query.path`). Parsed JSON is cached per page via module-level `_json_cache` keyed by `(id(soup), selector)`, cleared at start of each `parse_items()` call.
 
 ## How to add a new page to scrape
 

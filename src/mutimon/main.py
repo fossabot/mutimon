@@ -1275,6 +1275,48 @@ def evaluate_validator(validator, item):
     return evaluate_single_validator(validator, item)
 
 
+def evaluate_track(track, item):
+    """
+    Evaluate track states against an item (state machine).
+
+    Returns a dict with:
+      - _state: index of the first matching state (or None)
+      - _state_name: the "name" field or "test" expression of the matching state
+      - _value: rendered value expression (if track has "value")
+      - _silent: whether the matching state is silent
+    """
+    result = {"_state": None, "_state_name": None, "_silent": False}
+
+    # Render tracked value
+    if "value" in track:
+        try:
+            rendered = liquid.from_string(track["value"]).render(**item)
+            try:
+                result["_value"] = float(rendered)
+            except (ValueError, TypeError):
+                result["_value"] = rendered
+        except Exception:
+            result["_value"] = None
+
+    # Evaluate states top-down, first match wins
+    for i, state in enumerate(track["states"]):
+        try:
+            rendered = liquid.from_string(state["test"]).render(**item)
+            if bool(numexpr.evaluate(rendered)):
+                result["_state"] = i
+                result["_state_name"] = state.get("name", state["test"])
+                result["_silent"] = state.get("silent", False)
+                break
+        except Exception as e:
+            print(
+                f"Warning: Track state evaluation failed for '{state['test']}': {e}",
+                file=sys.stderr,
+            )
+            continue
+
+    return result
+
+
 def resolve_validator(validator, validators_defs):
     """
     Resolve @id references in a validator against defs.validators.
@@ -1306,22 +1348,23 @@ def resolve_inputs(rule, validators_defs=None):
     """
     Resolve the input entries for a rule.
 
-    Returns a list of {params, validator} dicts.
+    Returns a list of {params, validator, track} dicts.
 
     Supports:
-      - No 'input' field: uses rule's 'params' directly, no validator
+      - No 'input' field: uses rule's 'params' directly, no validator/track
       - 'input' as a single object: wraps in a list
       - 'input' as an array: used as-is
 
     Each input entry can have:
       - 'params': dict of URL template variables
-      - 'validator': numexpr expression string with Liquid variables
+      - 'validator': filter expression (mutually exclusive with 'track')
+      - 'track': state machine threshold tracking (mutually exclusive with 'validator')
     """
     if validators_defs is None:
         validators_defs = {}
     input_spec = rule.get("input")
     if input_spec is None:
-        return [{"params": rule.get("params", {}), "validator": None}]
+        return [{"params": rule.get("params", {}), "validator": None, "track": None}]
     if isinstance(input_spec, dict):
         input_spec = [input_spec]
     return [
@@ -1330,6 +1373,7 @@ def resolve_inputs(rule, validators_defs=None):
             "validator": resolve_validator(
                 entry.get("validator"), validators_defs
             ),
+            "track": entry.get("track"),
         }
         for entry in input_spec
     ]
@@ -1356,9 +1400,12 @@ def process_rule(config, rule, save_only=False):
     inputs = resolve_inputs(rule, validators_defs)
     all_items = []
 
+    has_track = any(inp.get("track") for inp in inputs)
+
     for input_entry in inputs:
         params = input_entry["params"]
         validator = input_entry["validator"]
+        track = input_entry.get("track")
 
         try:
             items = fetch_all_items(definition, params)
@@ -1384,13 +1431,24 @@ def process_rule(config, rule, save_only=False):
             if id_spec and not item.get("id"):
                 item["id"] = extract_id(item, id_spec)
 
-        # Mark each item with validator result
-        for item in items:
-            item["_valid"] = evaluate_validator(validator, item) if validator else True
-
-        valid_count = sum(1 for i in items if i["_valid"])
-        if validator and valid_count != len(items):
-            log(f"  Validator: {valid_count}/{len(items)} item(s) passed")
+        # Mark each item with validator result or track state
+        if track:
+            for item in items:
+                result = evaluate_track(track, item)
+                item["_state"] = result["_state"]
+                item["_state_name"] = result["_state_name"]
+                item["_silent"] = result["_silent"]
+                if "_value" in result:
+                    item["_value"] = result["_value"]
+                item["_valid"] = True  # track keeps all items
+        else:
+            for item in items:
+                item["_valid"] = (
+                    evaluate_validator(validator, item) if validator else True
+                )
+            valid_count = sum(1 for i in items if i["_valid"])
+            if validator and valid_count != len(items):
+                log(f"  Validator: {valid_count}/{len(items)} item(s) passed")
 
         all_items.extend(items)
 
@@ -1423,22 +1481,43 @@ def process_rule(config, rule, save_only=False):
         if "id" in item:
             known_by_id[item["id"]] = item
 
-    # Find items to notify about:
-    # - New items that pass the validator
-    # - Known items that previously failed the validator but now pass
-    #   (threshold crossing: e.g. price dropped below and rose back above)
+    # Find items to notify about
     notify_items = []
-    for item in all_items:
-        item_id = item.get("id")
-        if not item["_valid"]:
-            continue
-        prev = known_by_id.get(item_id)
-        if prev is None:
-            # New item that passes validator
-            notify_items.append(item)
-        elif not prev.get("_valid", True):
-            # Was invalid before, now valid — threshold crossed
-            notify_items.append(item)
+    if has_track:
+        # Track mode: notify on state transitions (unless silent)
+        for item in all_items:
+            item_id = item.get("id")
+            current_state = item.get("_state")
+            prev = known_by_id.get(item_id)
+            prev_state = prev.get("_state") if prev else None
+
+            # Attach previous state info for templates
+            item["_prev_state"] = prev_state
+            item["_prev_state_name"] = prev.get("_state_name") if prev else None
+
+            if current_state is None:
+                continue
+            if prev is None:
+                # New item — notify if not silent
+                if not item.get("_silent", False):
+                    notify_items.append(item)
+            elif current_state != prev_state:
+                # State changed — notify if new state is not silent
+                if not item.get("_silent", False):
+                    notify_items.append(item)
+    else:
+        # Validator mode: notify on _valid transitions
+        for item in all_items:
+            item_id = item.get("id")
+            if not item["_valid"]:
+                continue
+            prev = known_by_id.get(item_id)
+            if prev is None:
+                # New item that passes validator
+                notify_items.append(item)
+            elif not prev.get("_valid", True):
+                # Was invalid before, now valid — threshold crossed
+                notify_items.append(item)
 
     if notify_items:
         info(f"[{rule_name}] {len(notify_items)} new item(s) — sending notification")
@@ -1472,7 +1551,13 @@ def process_rule(config, rule, save_only=False):
     else:
         log(f"[{rule_name}] No changes to notify about.")
 
-    # Save ALL items (including those that failed validator) with _valid status
+    # Strip transient fields before saving
+    for item in all_items:
+        item.pop("_prev_state", None)
+        item.pop("_prev_state_name", None)
+        item.pop("_silent", None)
+
+    # Save ALL items (including those that failed validator) with state
     save_state(rule_name, all_items)
     save_last_run(rule_name)
     log(f"  State saved for '{rule_name}'")

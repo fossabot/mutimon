@@ -1,3 +1,6 @@
+## 0.3.0
+* add tracking state machine
+
 ## 0.2.0
 * add `--cron` option and improve cron setup
 

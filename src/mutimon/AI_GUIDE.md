@@ -159,6 +159,30 @@ Rule:
 }
 ```
 
+## State-machine tracking (`track`)
+
+Use `track` instead of `validator` when you need per-threshold notifications (e.g. "notify each time the price crosses 190, then again at 200"). Mutually exclusive with `validator`.
+
+```json
+"input": {
+  "params": { "symbol": "ASSECOPOL" },
+  "track": {
+    "value": "{{price}}",
+    "states": [
+      { "test": "{{price}} > 200", "name": "above 200 zł" },
+      { "test": "{{price}} > 190", "name": "above 190 zł" },
+      { "test": "{{price}} > 180", "name": "above 180 zł" },
+      { "test": "{{price}} <= 180", "silent": true }
+    ]
+  }
+}
+```
+
+- States evaluated top-down, first match wins
+- Notifies when state index changes (unless new state is `silent`)
+- `silent: true` saves state without notifying (use for "below all thresholds" reset state)
+- Template vars: `{{ item._state_name }}`, `{{ item._prev_state_name }}`, `{{ item._value }}`
+
 ## Tips
 
 - Always add `"expect"` selectors to detect page redesigns
@@ -166,3 +190,4 @@ Rule:
 - Use `mon --dry-run --force <name>` to test without sending emails or saving state
 - For RSS/Atom feeds: use `"format": "xml"` and element names as selectors (e.g. `"item"`, `"entry"`)
 - The `id` field is crucial — it's how Mutimon tracks which items are new
+- Use `track` instead of `validator` when you need per-threshold notifications (stock prices, scores, etc.)

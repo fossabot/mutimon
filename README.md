@@ -890,7 +890,7 @@ The `subject` field in a rule is also a Liquid template with access to the same 
 3. For `parse: "money"`, the page language is detected from `<html lang>` or the `Content-Language` header, and used for locale-aware currency parsing via [babel](https://babel.pocoo.org/)
 4. Items are compared against the saved state in `~/.mutimon/data/<rule_name>`
 5. New items, or items that crossed a validator threshold (previously failed, now pass), trigger an email notification
-6. ALL items are saved in state with a `_valid` flag, so threshold crossings are detected on subsequent runs
+6. ALL items are saved in state with a `_valid` flag (or `_state` index for track mode), so threshold crossings are detected on subsequent runs
 
 ## Threshold crossing detection
 
@@ -902,6 +902,83 @@ When a rule has validators, the scraper tracks whether each item passed or faile
 4. **Price stays at $76k** → validator passes, previous `_valid` was true → no notification
 
 This works for both upward thresholds (`>=`) and downward thresholds (`<=`). The state file stores all fetched items (not just those passing the validator) with a `_valid` boolean.
+
+## State-machine tracking (`track`)
+
+For more granular threshold monitoring, use `track` instead of `validator` on an input entry. While `validator` stores a single pass/fail boolean, `track` implements a state machine that tracks *which* threshold an item is in and notifies on every state transition.
+
+`track` and `validator` are mutually exclusive on the same input entry.
+
+### Configuration
+
+```json
+"input": {
+  "params": { "symbol": "ASSECOPOL" },
+  "track": {
+    "value": "{{price}}",
+    "states": [
+      { "test": "{{price}} > 200", "name": "above 200 zł" },
+      { "test": "{{price}} > 190", "name": "above 190 zł" },
+      { "test": "{{price}} > 180", "name": "above 180 zł" },
+      { "test": "{{price}} <= 180", "silent": true }
+    ]
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `value` | no | Liquid expression to evaluate and save as `_value` for templates. |
+| `states` | yes | Array of state definitions, evaluated top-down. First matching state wins. |
+| `states[].test` | yes | numexpr expression with Liquid variables. |
+| `states[].name` | no | Human-friendly label, available as `{{ item._state_name }}` in templates. Defaults to the `test` expression. |
+| `states[].silent` | no | If `true`, transitioning to this state saves state but does not trigger a notification. Default `false`. |
+
+### How it works
+
+States are evaluated top-down — the first matching `test` expression determines the item's current state (by index). On each run:
+
+1. **New item** — notify if the current state is not `silent`
+2. **State changed** (index differs from previous run) — notify if the new state is not `silent`
+3. **State unchanged** — no notification
+
+### Example: stock price monitoring
+
+```json
+"track": {
+  "value": "{{price}}",
+  "states": [
+    { "test": "{{price}} > 200", "name": "above 200 zł" },
+    { "test": "{{price}} > 190", "name": "above 190 zł" },
+    { "test": "{{price}} > 180", "name": "above 180 zł" },
+    { "test": "{{price}} <= 180", "silent": true }
+  ]
+}
+```
+
+| Run | Price | State | Previous | Notify? |
+|-----|-------|-------|----------|---------|
+| 1 | 185 | above 180 zł (2) | — | Yes (new) |
+| 2 | 188 | above 180 zł (2) | above 180 zł (2) | No (same state) |
+| 3 | 195 | above 190 zł (1) | above 180 zł (2) | **Yes** (crossed 190) |
+| 4 | 170 | silent (3) | above 190 zł (1) | No (silent) |
+| 5 | 185 | above 180 zł (2) | silent (3) | **Yes** (came back) |
+| 6 | 195 | above 190 zł (1) | above 180 zł (2) | **Yes** (crossed 190 again) |
+
+### Template variables
+
+In track mode, the following variables are available in templates:
+
+| Variable | Description |
+|----------|-------------|
+| `{{ item._state_name }}` | Name (or test expression) of the current state |
+| `{{ item._prev_state_name }}` | Name of the previous state (or empty for new items) |
+| `{{ item._value }}` | Rendered value from `track.value` (e.g. the current price) |
+
+### When to use `track` vs `validator`
+
+- **`validator`** — binary filter: include/exclude items. Good for "notify me about new Hacker News posts with score > 100" or "exclude job offers with Angular".
+- **`track`** — state machine: notify on every threshold crossing. Good for "notify me each time ASSECOPOL crosses above 190 zł, and again when it crosses above 200 zł".
 
 ## Error handling
 
@@ -959,6 +1036,31 @@ The bitcoin rule uses two input entries — one for upward thresholds (`>=`), on
   }
 ]
 ```
+
+> **Tip:** For more granular notifications (e.g. notify each time the price crosses a specific level, not just when it re-enters a "passing" state), use [`track`](#state-machine-tracking-track) instead of `validator`.
+
+### Stock price tracking — State machine
+
+Monitors stock prices with per-threshold notifications using `track`. Unlike the Bitcoin example which uses validator (binary pass/fail), `track` notifies on every state transition — e.g. when a stock crosses above 190 zł, then again when it crosses 200 zł.
+
+```json
+"input": [
+  {
+    "params": { "symbol": "ASSECOPOL" },
+    "track": {
+      "value": "{{price}}",
+      "states": [
+        { "test": "{{price}} > 200", "name": "above 200 zł" },
+        { "test": "{{price}} > 190", "name": "above 190 zł" },
+        { "test": "{{price}} > 180", "name": "above 180 zł" },
+        { "test": "{{price}} <= 180", "silent": true }
+      ]
+    }
+  }
+]
+```
+
+The `silent` state at the bottom acts as a "reset" — when the price drops below 180, no notification is sent, but the state is saved. When the price rises back above 180, it's detected as a state change and triggers a new notification.
 
 ### Reddit subreddit — RSS/Atom feed
 
@@ -1023,6 +1125,13 @@ Or with any AI assistant — just paste the contents of the file as context alon
 > Notify me when the price crosses above $75,000 or drops below $60,000.
 > Check every 4 hours. Send alerts to user@example.com. Read the README.md,
 > config.schema.json, and skeleton/config.json for reference.
+
+### Stock price tracking with state machine
+
+> Monitor ASSECOPOL stock on https://www.bankier.pl/inwestowanie/profile/quote.html?symbol=ASSECOPOL.
+> Use `track` (not `validator`) to notify me each time the price crosses above 180, 190, or 200 zł.
+> Add a silent state for below 180 so I only get notified when it rises back above thresholds.
+> Check twice daily during market hours. Read the README.md for the `track` section.
 
 ### Monitor for a feature release
 
