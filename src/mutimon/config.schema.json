@@ -107,20 +107,52 @@
   "$defs": {
     "definition": {
       "type": "object",
-      "description": "A scraping definition that describes how to fetch and parse data from a website.",
-      "required": ["url", "query"],
+      "description": "A scraping definition that describes how to fetch and parse data from a website or API.",
+      "required": ["query"],
       "additionalProperties": false,
       "properties": {
+        "sources": {
+          "type": "array",
+          "description": "Multiple API endpoints to fetch and merge into one item. Each source produces named variables. Only for format: 'json'.",
+          "items": {
+            "type": "object",
+            "required": ["name", "url"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "description": "Name prefix for variables from this source." },
+              "url": { "type": "string", "description": "URL to fetch. Supports Liquid templates." },
+              "method": { "type": "string", "enum": ["GET", "POST"], "default": "GET" },
+              "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+              "query": { "$ref": "#/$defs/query" }
+            }
+          }
+        },
         "format": {
           "type": "string",
-          "enum": ["html", "xml"],
+          "enum": ["html", "xml", "json"],
           "default": "html",
-          "description": "'html': parse the response as HTML using the default html.parser (default). 'xml': parse the response as XML using the lxml XML parser. Use this for RSS/Atom feeds or any XML document where CSS selectors target XML elements."
+          "description": "'html': parse as HTML with BeautifulSoup (default). 'xml': parse as XML with lxml. 'json': parse as JSON, query with JMESPath."
         },
         "userAgent": {
           "type": "string",
-          "description": "Custom User-Agent header for HTTP requests. If omitted, the default browser-like User-Agent is used. Useful for RSS feeds or APIs that require a specific User-Agent."
+          "description": "Custom User-Agent header for HTTP requests. If omitted, the default browser-like User-Agent is used."
         },
+        "method": {
+          "type": "string",
+          "enum": ["GET", "POST"],
+          "default": "GET",
+          "description": "HTTP method for requests."
+        },
+        "headers": {
+          "type": "object",
+          "description": "HTTP headers. Values support Liquid templates (e.g. {{secret.api_key}}).",
+          "additionalProperties": { "type": "string" }
+        },
+        "body": {
+          "type": "object",
+          "description": "Request body for POST requests (sent as JSON). Values support Liquid templates."
+        },
+        "auth": { "$ref": "#/$defs/auth" },
         "url": {
           "type": "string",
           "format": "uri-template",
@@ -191,19 +223,24 @@
     },
     "query": {
       "type": "object",
-      "description": "Defines how to extract structured data from the fetched HTML page.",
-      "required": ["type", "selector", "variables"],
+      "description": "Defines how to extract structured data from the fetched page or API response.",
+      "required": ["type"],
       "additionalProperties": false,
       "properties": {
         "type": {
           "type": "string",
           "enum": ["list", "single"],
-          "description": "'list': select multiple elements (e.g. all job listings on a page). 'single': select one element (e.g. the latest blog post)."
+          "description": "'list': multiple items (e.g. all job listings). 'single': one item per page/response."
         },
         "selector": {
           "type": "string",
-          "description": "CSS selector for the item container(s). For 'list', this matches multiple elements. For 'single', it matches the first element.",
+          "description": "CSS selector for item container(s). Required for html/xml format.",
           "examples": ["article.job", "tr.athing.submission", "article:first-child"]
+        },
+        "path": {
+          "type": "string",
+          "description": "JMESPath expression to navigate JSON response. Used with format: 'json'.",
+          "examples": ["data", "items[*]", ""]
         },
         "id": {
           "$ref": "#/$defs/idSpec"
@@ -298,14 +335,17 @@
     },
     "variable": {
       "type": "object",
-      "description": "Defines how to extract a named value from a matched element using a CSS selector. By default extracts from the first matching element. Set 'collect' to true to extract from ALL matching elements and join them. When combined with parse 'json' and a query, extracts structured data from JSON content (e.g. Next.js __NEXT_DATA__).",
-      "required": ["selector", "value"],
+      "description": "Defines how to extract a named value. For HTML/XML: uses CSS selector + value spec. For JSON format: uses JMESPath 'path'.",
       "additionalProperties": false,
       "properties": {
+        "path": {
+          "type": "string",
+          "description": "JMESPath expression for JSON format. Extracts a value directly from the JSON data."
+        },
         "selector": {
           "type": "string",
-          "description": "CSS selector relative to the item container (or its sibling if 'sibling' is true). Use the special value ':self' to reference the container element itself. For JSON extraction, use a global selector like 'script#__NEXT_DATA__'.",
-          "examples": [".titleline > a", "a.job__title-link", ".score", ".skill-tag", ":self", "script#__NEXT_DATA__"]
+          "description": "CSS selector relative to the item container (or its sibling if 'sibling' is true). Use ':self' to reference the container element itself.",
+          "examples": [".titleline > a", "a.job__title-link", ".score", ":self"]
         },
         "value": {
           "$ref": "#/$defs/valueSpec"
@@ -452,6 +492,11 @@
               "examples": [["0,30 9 * * *", "0 16 * * *"]]
             }
           ]
+        },
+        "notify": {
+          "type": "string",
+          "enum": ["always"],
+          "description": "Set to 'always' to send notification on every run regardless of whether items are new. Useful for periodic reports (e.g. daily analytics)."
         },
         "subject": {
           "type": "string",
@@ -670,6 +715,89 @@
         { "required": ["var", "include"] },
         { "required": ["var", "exclude"] }
       ]
+    },
+    "auth": {
+      "type": "object",
+      "description": "Authentication configuration. Defines how to login, optionally refresh tokens, and apply credentials to requests.",
+      "required": ["login", "apply"],
+      "additionalProperties": false,
+      "properties": {
+        "login": { "$ref": "#/$defs/authStep" },
+        "refresh": { "$ref": "#/$defs/authStep" },
+        "apply": {
+          "type": "object",
+          "description": "How to attach auth credentials to every data request.",
+          "additionalProperties": false,
+          "properties": {
+            "headers": {
+              "type": "object",
+              "description": "Headers to add. Values support {{auth.key}} Liquid variables.",
+              "additionalProperties": { "type": "string" }
+            },
+            "cookies": {
+              "type": "object",
+              "description": "Cookies to send. Values support {{auth.key}} Liquid variables.",
+              "additionalProperties": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "authStep": {
+      "type": "object",
+      "description": "An auth request step (login or refresh).",
+      "required": ["url"],
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Auth endpoint URL. Supports Liquid templates."
+        },
+        "method": {
+          "type": "string",
+          "enum": ["GET", "POST"],
+          "default": "POST",
+          "description": "HTTP method for the auth request."
+        },
+        "format": {
+          "type": "string",
+          "enum": ["json", "html", "xml"],
+          "default": "json",
+          "description": "Response format of the auth endpoint."
+        },
+        "headers": {
+          "type": "object",
+          "description": "Headers for the auth request. Supports Liquid templates.",
+          "additionalProperties": { "type": "string" }
+        },
+        "body": {
+          "type": "object",
+          "description": "Request body (sent as JSON). Values support Liquid templates."
+        },
+        "extract": {
+          "type": "object",
+          "description": "Values to extract from the auth response. Each key becomes available as {{auth.key}}.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": ["body", "cookie", "header"],
+                "default": "body",
+                "description": "'body': extract from response body. 'cookie': from Set-Cookie. 'header': from response header."
+              },
+              "path": {
+                "type": "string",
+                "description": "JMESPath (json) or CSS selector (html/xml) to extract value from body."
+              },
+              "name": {
+                "type": "string",
+                "description": "Cookie or header name to extract."
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

@@ -40,7 +40,7 @@ class TestFetchPage:
         fake_response = mock.MagicMock()
         fake_response.text = '<html lang="en"><body>Hello</body></html>'
         fake_response.headers = {}
-        with mock.patch("mutimon.main.requests.get", return_value=fake_response):
+        with mock.patch("mutimon.main.requests.request", return_value=fake_response):
             html, locale = main.fetch_page("https://example.com")
         assert "Hello" in html
 
@@ -50,7 +50,7 @@ class TestFetchPage:
         fake_response.content = xml_content
         fake_response.text = xml_content.decode()
         fake_response.headers = {}
-        with mock.patch("mutimon.main.requests.get", return_value=fake_response):
+        with mock.patch("mutimon.main.requests.request", return_value=fake_response):
             html, locale = main.fetch_page("https://example.com/feed", is_xml=True)
         assert "item" in str(html)
 
@@ -58,7 +58,7 @@ class TestFetchPage:
         fake_response = mock.MagicMock()
         fake_response.text = "<html></html>"
         fake_response.headers = {}
-        with mock.patch("mutimon.main.requests.get", return_value=fake_response) as mock_get:
+        with mock.patch("mutimon.main.requests.request", return_value=fake_response) as mock_get:
             main.fetch_page("https://example.com", user_agent="TestBot/1.0")
         call_headers = mock_get.call_args[1]["headers"]
         assert call_headers["User-Agent"] == "TestBot/1.0"
@@ -72,7 +72,7 @@ class TestFetchAllItems:
         fake_resp = mock.MagicMock()
         fake_resp.text = html
         fake_resp.headers = {}
-        return mock.patch("mutimon.main.requests.get", return_value=fake_resp)
+        return mock.patch("mutimon.main.requests.request", return_value=fake_resp)
 
     def test_basic_fetch(self):
         html = """
@@ -219,7 +219,7 @@ class TestProcessRule:
         fake_resp = mock.MagicMock()
         fake_resp.text = html
         fake_resp.headers = {}
-        return mock.patch("mutimon.main.requests.get", return_value=fake_resp)
+        return mock.patch("mutimon.main.requests.request", return_value=fake_resp)
 
     def test_new_items_trigger_email(self, tmp_mutimon):
         config = self._make_config(tmp_mutimon)
@@ -448,9 +448,10 @@ class TestRunFunction:
         }
         write_config(config)
         with mock.patch("sys.argv", ["mon"]):
-            with pytest.raises(SystemExit) as exc:
-                main.run()
-            assert exc.value.code == 1
+            with mock.patch.object(main, "load_secrets", return_value={}):
+                with pytest.raises(SystemExit) as exc:
+                    main.run()
+                assert exc.value.code == 1
 
     def test_force_specific_rule(self, tmp_mutimon, write_config, sample_config):
         write_config()
@@ -461,7 +462,7 @@ class TestRunFunction:
         fake_resp.text = html
         fake_resp.headers = {}
         with mock.patch("sys.argv", ["mon", "--force", "test-rule"]):
-            with mock.patch("mutimon.main.requests.get", return_value=fake_resp):
+            with mock.patch("mutimon.main.requests.request", return_value=fake_resp):
                 with mock.patch("mutimon.main.send_email"):
                     main.run()
 
@@ -488,7 +489,7 @@ class TestRunFunction:
         fake_resp.text = html
         fake_resp.headers = {}
         with mock.patch("sys.argv", ["mon", "--dry-run", "--force"]):
-            with mock.patch("mutimon.main.requests.get", return_value=fake_resp):
+            with mock.patch("mutimon.main.requests.request", return_value=fake_resp):
                 main.run()
         # No state saved in dry-run
         state = main.load_state("test-rule")

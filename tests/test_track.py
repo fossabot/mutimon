@@ -181,7 +181,7 @@ class TestProcessRuleTrack:
         fake_resp = mock.MagicMock()
         fake_resp.text = html
         fake_resp.headers = {}
-        return mock.patch("mutimon.main.requests.get", return_value=fake_resp)
+        return mock.patch("mutimon.main.requests.request", return_value=fake_resp)
 
     def _make_html(self, price):
         return f'<html><body><div class="price"><span>{price}</span></div></body></html>'

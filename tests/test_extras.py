@@ -260,7 +260,7 @@ class TestRunEdgeCases:
         fake_resp.text = html
         fake_resp.headers = {}
         with mock.patch("sys.argv", ["mon", "--save-email", "--force"]):
-            with mock.patch("mutimon.main.requests.get", return_value=fake_resp):
+            with mock.patch("mutimon.main.requests.request", return_value=fake_resp):
                 main.run()
         email_file = tmp_mutimon / "data" / "emails" / "test-rule.txt"
         assert email_file.exists()
@@ -434,7 +434,7 @@ class TestProcessRuleThresholds:
         fake_resp = mock.MagicMock()
         fake_resp.text = html
         fake_resp.headers = {}
-        return mock.patch("mutimon.main.requests.get", return_value=fake_resp)
+        return mock.patch("mutimon.main.requests.request", return_value=fake_resp)
 
     def test_threshold_crossing_renotifies(self, tmp_mutimon):
         config = self._make_config(tmp_mutimon)
@@ -489,7 +489,7 @@ class TestFetchAllItemsPagination:
 
         call_count = [0]
 
-        def fake_get(url, **kwargs):
+        def fake_get(method, url, **kwargs):
             call_count[0] += 1
             resp = mock.MagicMock()
             resp.text = page1 if call_count[0] == 1 else page2
@@ -513,7 +513,7 @@ class TestFetchAllItemsPagination:
                 },
             },
         }
-        with mock.patch("mutimon.main.requests.get", side_effect=fake_get):
+        with mock.patch("mutimon.main.requests.request", side_effect=fake_get):
             items = main.fetch_all_items(definition, {})
         assert len(items) == 2
         assert items[0]["title"] == "A"
@@ -533,7 +533,7 @@ class TestDryRunInRun:
         fake_resp.text = html
         fake_resp.headers = {}
         with mock.patch("sys.argv", ["mon", "--dry-run", "--force", "test-rule"]):
-            with mock.patch("mutimon.main.requests.get", return_value=fake_resp):
+            with mock.patch("mutimon.main.requests.request", return_value=fake_resp):
                 main.run()
         out = capsys.readouterr().out
         assert "DRY RUN" in out
@@ -640,7 +640,7 @@ class TestRunDryRunBranches:
         fake_resp.text = html
         fake_resp.headers = {}
         with mock.patch("sys.argv", ["mon", "--dry-run", "--force"]):
-            with mock.patch("mutimon.main.requests.get", return_value=fake_resp):
+            with mock.patch("mutimon.main.requests.request", return_value=fake_resp):
                 main.run()
         out = capsys.readouterr().out
         assert "DRY RUN" in out

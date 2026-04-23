@@ -4,6 +4,18 @@
 
 **Never add hardcoded logic to the code.** This project is entirely data-driven — all scraping logic, filtering, and behavior must be configured through `config.json`, not by modifying `main.py`. The code must remain generic. If a new feature or filter is needed, implement it as a generic config option that any rule can use, not as a special case in the code.
 
+## IMPORTANT: Secrets File
+
+**NEVER read `~/.mutimon/secrets.json` directly.** This file contains passwords and API keys. Do not use the Read tool on it or include its contents in conversation context. If you need secret values at runtime (e.g. to test an API), use inline Python that loads and uses them without printing:
+
+```python
+python3 -c "
+from mutimon.main import load_secrets
+secrets = load_secrets()
+# use secrets['umami']['username'] etc. in your code
+"
+```
+
 ## IMPORTANT: Lint Check
 
 **Always run `ruff check src/` after editing Python files.** Fix any errors before committing. Use `ruff check src/ --fix` for auto-fixable issues.

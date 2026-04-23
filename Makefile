@@ -1,4 +1,4 @@
-VERSION = 0.2.0
+VERSION = 0.3.0
 
 .PHONY: publish publish-test version build clean test coverage lint
 

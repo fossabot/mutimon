@@ -40,10 +40,13 @@ CONFIG_FILE = os.path.join(MUTIMON_DIR, "config.json")
 TEMPLATES_DIR = os.path.join(MUTIMON_DIR, "templates")
 DATA_DIR = os.path.join(MUTIMON_DIR, "data")
 SKELETON_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "skeleton")
+SECRETS_FILE = os.path.join(MUTIMON_DIR, "secrets.json")
+AUTH_DIR = os.path.join(DATA_DIR, ".auth")
 
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
 
 verbose = False
+_secrets = {}
 
 
 def log(msg):
@@ -144,6 +147,12 @@ def init_config():
 
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(TEMPLATES_DIR, exist_ok=True)
+    os.makedirs(AUTH_DIR, exist_ok=True)
+
+    # Create empty secrets.json if it doesn't exist
+    if not os.path.exists(SECRETS_FILE):
+        with open(SECRETS_FILE, "w", encoding="utf-8") as f:
+            json.dump({"email": {"password": ""}}, f, ensure_ascii=False, indent=2)
 
     if os.path.isdir(SKELETON_DIR):
         # Copy skeleton config.json
@@ -230,6 +239,26 @@ def load_config():
     """Load the configuration file."""
     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def load_secrets():
+    """Load secrets.json if it exists. Returns empty dict otherwise."""
+    if not os.path.exists(SECRETS_FILE):
+        return {}
+    try:
+        with open(SECRETS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def liquid_context(params, auth_data=None):
+    """Build Liquid rendering context with secrets and auth namespaces."""
+    ctx = dict(params)
+    ctx["secret"] = _secrets
+    if auth_data:
+        ctx["auth"] = auth_data
+    return ctx
 
 
 def validate_config(config):
@@ -546,9 +575,9 @@ def setup_liquid(config):
         liquid.add_filter(filter_name, make_filter(filter_expr, liquid))
 
 
-def render_url(url_template, params):
-    """Render a URL template with Liquid params."""
-    return liquid.from_string(url_template).render(**params)
+def render_url(url_template, params, auth_data=None):
+    """Render a URL template with Liquid params, secrets, and auth."""
+    return liquid.from_string(url_template).render(**liquid_context(params, auth_data))
 
 
 def detect_language(html, response_headers=None):
@@ -574,16 +603,209 @@ def detect_language(html, response_headers=None):
         return Locale.parse("en")
 
 
-def fetch_page(url, user_agent=None, is_xml=False):
-    """Fetch a single page and return its HTML and detected locale."""
-    headers = {"User-Agent": user_agent or USER_AGENT}
-    resp = requests.get(url, headers=headers, timeout=30)
+def fetch_url(url, method="GET", headers=None, body=None, user_agent=None):
+    """Fetch a URL with configurable method, headers, and body. Returns Response."""
+    req_headers = {"User-Agent": user_agent or USER_AGENT}
+    if headers:
+        req_headers.update(headers)
+    kwargs = {"headers": req_headers, "timeout": 30}
+    if method.upper() == "POST" and body is not None:
+        kwargs["json"] = body
+    resp = requests.request(method.upper(), url, **kwargs)
     resp.raise_for_status()
+    return resp
+
+
+def fetch_page(url, user_agent=None, is_xml=False, method="GET", headers=None, body=None):
+    """Fetch a single page and return its HTML and detected locale."""
+    resp = fetch_url(url, method=method, headers=headers, body=body, user_agent=user_agent)
     if is_xml:
         locale = Locale.parse("en")
     else:
         locale = detect_language(resp.text, resp.headers)
     return resp.text, locale
+
+
+def fetch_json(url, method="GET", headers=None, body=None, user_agent=None):
+    """Fetch URL and return parsed JSON."""
+    resp = fetch_url(url, method=method, headers=headers, body=body, user_agent=user_agent)
+    return resp.json()
+
+
+def parse_json_items(json_data, query_spec):
+    """Extract items from parsed JSON using JMESPath. Returns list of dicts."""
+    result = query_json(json_data, query_spec, {})
+    if isinstance(result, dict):
+        items = [result]
+    elif isinstance(result, list):
+        items = result
+    else:
+        return []
+    id_spec = query_spec.get("id")
+    for item in items:
+        if id_spec and not item.get("id"):
+            item["id"] = extract_id(item, id_spec)
+    return items
+
+
+# ========================= Auth =========================
+
+
+def _auth_cache_path(def_name):
+    """Path to cached auth data for a definition."""
+    return os.path.join(AUTH_DIR, f"{def_name}.json")
+
+
+def _load_cached_auth(def_name):
+    """Load cached auth tokens. Returns dict or None."""
+    path = _auth_cache_path(def_name)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _save_cached_auth(def_name, auth_data):
+    """Save auth tokens to cache."""
+    os.makedirs(AUTH_DIR, exist_ok=True)
+    path = _auth_cache_path(def_name)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(auth_data, f, ensure_ascii=False, indent=2)
+
+
+def _render_liquid_dict(d, ctx):
+    """Render all string values in a dict through Liquid."""
+    rendered = {}
+    for k, v in d.items():
+        if isinstance(v, str):
+            rendered[k] = liquid.from_string(v).render(**ctx)
+        else:
+            rendered[k] = v
+    return rendered
+
+
+def _extract_auth_values(resp, extract_spec, fmt="json"):
+    """Extract auth values from a response based on extract spec."""
+    auth_data = {}
+    # Parse body based on format
+    body_data = None
+    if fmt == "json":
+        try:
+            body_data = resp.json()
+        except Exception:
+            body_data = {}
+    elif fmt in ("html", "xml"):
+        body_data = resp.text
+
+    for key, spec in extract_spec.items():
+        source = spec.get("source", "body")
+        if source == "body":
+            if isinstance(body_data, dict) and "path" in spec:
+                auth_data[key] = jmespath.search(spec["path"], body_data)
+            elif isinstance(body_data, str) and "selector" in spec:
+                soup = BeautifulSoup(body_data, "html.parser")
+                el = soup.select_one(spec["selector"])
+                if el:
+                    auth_data[key] = el.get_text(strip=True)
+        elif source == "cookie":
+            auth_data[key] = resp.cookies.get(spec.get("name", ""))
+        elif source == "header":
+            auth_data[key] = resp.headers.get(spec.get("name", ""))
+    return auth_data
+
+
+def perform_auth_request(step_spec, params, existing_auth=None):
+    """Execute an auth step (login or refresh). Returns extracted auth data."""
+    ctx = liquid_context(params, existing_auth)
+    url = liquid.from_string(step_spec["url"]).render(**ctx)
+    method = step_spec.get("method", "POST")
+    fmt = step_spec.get("format", "json")
+
+    step_headers = _render_liquid_dict(step_spec.get("headers", {}), ctx)
+    step_body = _render_liquid_dict(step_spec.get("body", {}), ctx) if step_spec.get("body") else None
+
+    resp = fetch_url(url, method=method, headers=step_headers, body=step_body)
+
+    extract_spec = step_spec.get("extract", {})
+    auth_data = _extract_auth_values(resp, extract_spec, fmt)
+
+    # Merge with existing auth (for refresh — keep values not re-extracted)
+    if existing_auth:
+        merged = dict(existing_auth)
+        merged.update(auth_data)
+        return merged
+    return auth_data
+
+
+def resolve_auth(definition, params, def_name=None):
+    """
+    Resolve auth for a definition. Returns (headers_dict, cookies_dict, auth_data).
+    Handles caching, refresh, and login flows.
+    """
+    auth_spec = definition.get("auth")
+    if not auth_spec:
+        return {}, {}, None
+
+    apply_spec = auth_spec.get("apply", {})
+
+    # Try cached auth first
+    cached = _load_cached_auth(def_name) if def_name else None
+    if cached:
+        ctx = liquid_context(params, cached)
+        headers = _render_liquid_dict(apply_spec.get("headers", {}), ctx)
+        cookies = _render_liquid_dict(apply_spec.get("cookies", {}), ctx)
+        return headers, cookies, cached
+
+    # No cache — login
+    login_spec = auth_spec.get("login")
+    if not login_spec:
+        return {}, {}, None
+
+    auth_data = perform_auth_request(login_spec, params)
+    if def_name:
+        _save_cached_auth(def_name, auth_data)
+
+    ctx = liquid_context(params, auth_data)
+    headers = _render_liquid_dict(apply_spec.get("headers", {}), ctx)
+    cookies = _render_liquid_dict(apply_spec.get("cookies", {}), ctx)
+    return headers, cookies, auth_data
+
+
+def retry_auth(auth_spec, params, def_name, cached_auth):
+    """Handle 401 — try refresh, then re-login. Returns (headers, cookies, auth_data) or None."""
+    # Try refresh first
+    refresh_spec = auth_spec.get("refresh")
+    if refresh_spec and cached_auth:
+        try:
+            auth_data = perform_auth_request(refresh_spec, params, cached_auth)
+            if def_name:
+                _save_cached_auth(def_name, auth_data)
+            apply_spec = auth_spec.get("apply", {})
+            ctx = liquid_context(params, auth_data)
+            headers = _render_liquid_dict(apply_spec.get("headers", {}), ctx)
+            cookies = _render_liquid_dict(apply_spec.get("cookies", {}), ctx)
+            return headers, cookies, auth_data
+        except Exception:
+            pass  # Refresh failed, try re-login
+
+    # Re-login
+    login_spec = auth_spec.get("login")
+    if not login_spec:
+        return None
+    try:
+        auth_data = perform_auth_request(login_spec, params)
+        if def_name:
+            _save_cached_auth(def_name, auth_data)
+        apply_spec = auth_spec.get("apply", {})
+        ctx = liquid_context(params, auth_data)
+        headers = _render_liquid_dict(apply_spec.get("headers", {}), ctx)
+        cookies = _render_liquid_dict(apply_spec.get("cookies", {}), ctx)
+        return headers, cookies, auth_data
+    except Exception:
+        return None
 
 
 def extract_value(element, value_spec, default=None, locale=None):
@@ -1032,58 +1254,174 @@ def check_expect(html, expect_selectors, url, bs_parser="html.parser"):
     return missing
 
 
-def fetch_all_items(definition, params):
+def _render_http_options(definition, params, auth_data=None):
+    """Render headers and body from definition with Liquid context."""
+    ctx = liquid_context(params, auth_data)
+    rendered_headers = _render_liquid_dict(definition.get("headers", {}), ctx)
+    body = definition.get("body")
+    rendered_body = _render_liquid_dict(body, ctx) if isinstance(body, dict) else None
+    return rendered_headers, rendered_body
+
+
+def fetch_all_items(definition, params, def_name=None):
     """
     Fetch all items across all pages for a definition.
     Returns list of item dicts.
 
+    Supports format: "html" (default), "xml", or "json".
     Raises ValueError if 'expect' selectors are missing from the page.
     """
-    pagination_spec = definition.get("pagination")
+    fmt = definition.get("format", "html")
     query_spec = definition["query"]
-    max_pages = pagination_spec.get("max_pages", 1) if pagination_spec else 1
-    expect_selectors = query_spec.get("expect")
-    bs_parser = "xml" if definition.get("format") == "xml" else "html.parser"
     user_agent = definition.get("userAgent")
+    method = definition.get("method", "GET")
+
+    # Resolve auth
+    auth_headers, auth_cookies, auth_data = resolve_auth(definition, params, def_name)
+
+    # Render HTTP options
+    rendered_headers, rendered_body = _render_http_options(definition, params, auth_data)
+    rendered_headers.update(auth_headers)
+
+    # Build cookie header
+    if auth_cookies:
+        cookie_str = "; ".join(f"{k}={v}" for k, v in auth_cookies.items())
+        existing = rendered_headers.get("Cookie", "")
+        rendered_headers["Cookie"] = f"{existing}; {cookie_str}" if existing else cookie_str
+
+    url_template = definition.get("url", "")
+    url = render_url(url_template, params, auth_data) if url_template else ""
     all_items = []
-    page_num = 1
-    url = render_url(definition["url"], params)
 
-    while page_num <= max_pages:
-        log(f"  Fetching page {page_num}: {url}")
-        html, locale = fetch_page(url, user_agent=user_agent, is_xml=bs_parser == "xml")
-
-        # Check expected structure on first page only
-        if page_num == 1 and expect_selectors:
-            missing = check_expect(html, expect_selectors, url, bs_parser=bs_parser)
-            if missing:
-                raise ValueError(
-                    f"HTML structure changed at {url}. "
-                    f"Missing expected selector(s): {', '.join(missing)}"
-                )
-
-        # Check reject selectors — if any match, skip this page (no real results)
-        reject_selectors = query_spec.get("reject")
-        if reject_selectors:
-            soup = BeautifulSoup(html, bs_parser)
-            for sel in reject_selectors:
-                if soup.select_one(sel):
-                    log(f"  Reject selector matched: {sel} — skipping results")
-                    return all_items
-
-        items = parse_items(html, query_spec, locale=locale, bs_parser=bs_parser)
-
-        if not items:
-            break
-
-        all_items.extend(items)
-
-        next_url = find_next_page_url(html, pagination_spec, url)
-        if next_url:
-            url = next_url
-            page_num += 1
+    if fmt == "json":
+        sources = definition.get("sources")
+        if sources:
+            # Multi-source: fetch multiple URLs, merge into one item
+            item = {}
+            ctx = liquid_context(params, auth_data)
+            for source in sources:
+                src_url = liquid.from_string(source["url"]).render(**ctx)
+                src_method = source.get("method", method)
+                src_headers = dict(rendered_headers)
+                src_headers.update(_render_liquid_dict(source.get("headers", {}), ctx))
+                log(f"  Fetching JSON ({source['name']}): {src_url}")
+                try:
+                    json_data = fetch_json(
+                        src_url, method=src_method, headers=src_headers,
+                        user_agent=user_agent,
+                    )
+                except requests.HTTPError as e:
+                    if e.response is not None and e.response.status_code == 401 and definition.get("auth"):
+                        result = retry_auth(definition["auth"], params, def_name, auth_data)
+                        if result:
+                            src_headers.update(result[0])
+                            json_data = fetch_json(
+                                src_url, method=src_method, headers=src_headers,
+                                user_agent=user_agent,
+                            )
+                        else:
+                            raise
+                    else:
+                        raise
+                # Extract variables from this source
+                src_query = source.get("query", {})
+                if src_query:
+                    src_items = parse_json_items(json_data, src_query)
+                    if src_query.get("type") == "list":
+                        item[source["name"]] = src_items
+                    elif src_items:
+                        # Single: merge variables into item directly
+                        for k, v in src_items[0].items():
+                            if k != "id":
+                                item[source["name"] + "_" + k] = v
+                else:
+                    item[source["name"]] = json_data
+            # Set ID from params
+            id_spec = definition.get("query", {}).get("id")
+            if id_spec:
+                item["id"] = extract_id(item, id_spec)
+            all_items = [item]
         else:
-            break
+            # Single URL JSON path
+            log(f"  Fetching JSON: {url}")
+            try:
+                json_data = fetch_json(
+                    url, method=method, headers=rendered_headers,
+                    body=rendered_body, user_agent=user_agent,
+                )
+            except requests.HTTPError as e:
+                if e.response is not None and e.response.status_code == 401 and definition.get("auth"):
+                    result = retry_auth(definition["auth"], params, def_name, auth_data)
+                    if result:
+                        rendered_headers.update(result[0])
+                        json_data = fetch_json(
+                            url, method=method, headers=rendered_headers,
+                            body=rendered_body, user_agent=user_agent,
+                        )
+                    else:
+                        raise
+                else:
+                    raise
+            all_items = parse_json_items(json_data, query_spec)
+
+    else:
+        # HTML/XML path
+        pagination_spec = definition.get("pagination")
+        max_pages = pagination_spec.get("max_pages", 1) if pagination_spec else 1
+        expect_selectors = query_spec.get("expect")
+        bs_parser = "xml" if fmt == "xml" else "html.parser"
+        page_num = 1
+
+        while page_num <= max_pages:
+            log(f"  Fetching page {page_num}: {url}")
+            try:
+                html, locale = fetch_page(
+                    url, user_agent=user_agent, is_xml=bs_parser == "xml",
+                    method=method, headers=rendered_headers, body=rendered_body,
+                )
+            except requests.HTTPError as e:
+                if e.response is not None and e.response.status_code == 401 and definition.get("auth"):
+                    result = retry_auth(definition["auth"], params, def_name, auth_data)
+                    if result:
+                        rendered_headers.update(result[0])
+                        html, locale = fetch_page(
+                            url, user_agent=user_agent, is_xml=bs_parser == "xml",
+                            method=method, headers=rendered_headers, body=rendered_body,
+                        )
+                    else:
+                        raise
+                else:
+                    raise
+
+            # Check expected structure on first page only
+            if page_num == 1 and expect_selectors:
+                missing = check_expect(html, expect_selectors, url, bs_parser=bs_parser)
+                if missing:
+                    raise ValueError(
+                        f"HTML structure changed at {url}. "
+                        f"Missing expected selector(s): {', '.join(missing)}"
+                    )
+
+            # Check reject selectors
+            reject_selectors = query_spec.get("reject")
+            if reject_selectors:
+                soup = BeautifulSoup(html, bs_parser)
+                for sel in reject_selectors:
+                    if soup.select_one(sel):
+                        log(f"  Reject selector matched: {sel} — skipping results")
+                        return all_items
+
+            items = parse_items(html, query_spec, locale=locale, bs_parser=bs_parser)
+            if not items:
+                break
+            all_items.extend(items)
+
+            next_url = find_next_page_url(html, pagination_spec, url)
+            if next_url:
+                url = next_url
+                page_num += 1
+            else:
+                break
 
     return all_items
 
@@ -1113,7 +1451,7 @@ def render_email(template_str, subject_template, items, params, definition):
       - now: current datetime string
       - search_url: the rendered URL
     """
-    search_url = render_url(definition["url"], params)
+    search_url = render_url(definition.get("url", ""), params)
 
     # Add 1-based index to items
     indexed_items = []
@@ -1122,7 +1460,7 @@ def render_email(template_str, subject_template, items, params, definition):
         item_copy["index"] = i
         indexed_items.append(item_copy)
 
-    context = dict(params)
+    context = liquid_context(params)
     context["items"] = indexed_items
     context["count"] = len(items)
     context["now"] = str(datetime.now())
@@ -1408,7 +1746,7 @@ def process_rule(config, rule, save_only=False):
         track = input_entry.get("track")
 
         try:
-            items = fetch_all_items(definition, params)
+            items = fetch_all_items(definition, params, def_name=ref)
         except ValueError as e:
             # Structure change detected — send error email
             msg = str(e)
@@ -1482,8 +1820,11 @@ def process_rule(config, rule, save_only=False):
             known_by_id[item["id"]] = item
 
     # Find items to notify about
+    notify_always = rule.get("notify") == "always"
     notify_items = []
-    if has_track:
+    if notify_always:
+        notify_items = [item for item in all_items if item.get("_valid", True)]
+    elif has_track:
         # Track mode: notify on state transitions (unless silent)
         for item in all_items:
             item_id = item.get("id")
@@ -1656,6 +1997,14 @@ def run():
         print_setup_guide()
     config = load_config()
 
+    # Load secrets and merge email password
+    global _secrets
+    _secrets = load_secrets()
+    if _secrets.get("email", {}).get("password"):
+        config.setdefault("email", {}).setdefault("server", {})["password"] = (
+            _secrets["email"]["password"]
+        )
+
     if args.list:
         rules = config.get("rules", [])
         if not rules:
@@ -1732,7 +2081,7 @@ def run():
                 params = input_entry["params"]
                 validator = input_entry["validator"]
                 try:
-                    items = fetch_all_items(definition, params)
+                    items = fetch_all_items(definition, params, def_name=ref)
                     if validator:
                         items = [i for i in items if evaluate_validator(validator, i)]
                     id_spec = definition["query"].get("id")
