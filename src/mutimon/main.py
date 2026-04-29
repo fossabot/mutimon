@@ -1682,6 +1682,50 @@ def resolve_validator(validator, validators_defs):
     return validator
 
 
+def _replace_each_placeholders(template, var_name, value):
+    """Replace {{var}} or {{var.key}} placeholders with value (string or dict)."""
+    import re
+    if isinstance(value, str):
+        return template.replace("{{" + var_name + "}}", value)
+    prefix = var_name + "."
+    def replacer(match):
+        key = match.group(1)
+        if key == var_name:
+            return str(value)
+        if key.startswith(prefix):
+            path = key[len(prefix):]
+            obj = value
+            for part in path.split("."):
+                if isinstance(obj, dict) and part in obj:
+                    obj = obj[part]
+                else:
+                    return match.group(0)
+            return str(obj)
+        return match.group(0)
+    return re.sub(r"\{\{(\s*" + re.escape(var_name) + r"(?:\.[a-zA-Z0-9_.]*)?)\}\}", replacer, template)
+
+
+def expand_input_each(input_spec):
+    """Expand an input with 'each' into a list of input entries."""
+    each = input_spec["each"]
+    var_name = each["var"]
+    values = each["values"]
+    template_params = input_spec.get("params", {})
+    validator = input_spec.get("validator")
+    track = input_spec.get("track")
+    entries = []
+    for value in values:
+        params = {k: _replace_each_placeholders(v, var_name, value)
+                  for k, v in template_params.items()}
+        entry = {"params": params}
+        if validator is not None:
+            entry["validator"] = validator
+        if track is not None:
+            entry["track"] = track
+        entries.append(entry)
+    return entries
+
+
 def resolve_inputs(rule, validators_defs=None):
     """
     Resolve the input entries for a rule.
@@ -1709,7 +1753,10 @@ def resolve_inputs(rule, validators_defs=None):
             ]
         return [{"params": params, "validator": None, "track": None}]
     if isinstance(input_spec, dict):
-        input_spec = [input_spec]
+        if "each" in input_spec:
+            input_spec = expand_input_each(input_spec)
+        else:
+            input_spec = [input_spec]
     return [
         {
             "params": entry.get("params", rule.get("params", {})),

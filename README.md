@@ -486,6 +486,35 @@ Each entry fetches the URL with its own `params`. If `input` is omitted, the rul
 
 Params from each input entry are merged into the extracted items, so they're available in templates (e.g. `{{symbol}}`).
 
+### Input expansion with `each`
+
+When multiple inputs share the same structure and only differ by one parameter, use `each` to avoid repeating the same object:
+
+```json
+"input": {
+  "each": { "var": "subreddit", "values": ["Python", "JavaScript", "scheme"] },
+  "params": { "feed_url": "https://www.reddit.com/r/{{subreddit}}/new.rss" },
+  "validator": { "@id": "hiring-posts" }
+}
+```
+
+This expands into three input entries, one per value, each with its own `params` where `{{subreddit}}` is replaced. The `validator` (or `track`) is shared across all entries.
+
+The `each.values` array can also contain objects, accessed via dot notation:
+
+```json
+"input": {
+  "each": {
+    "var": "data",
+    "values": [
+      { "category": "electronics", "type": "phones" },
+      { "category": "computers", "type": "laptops" }
+    ]
+  },
+  "params": { "url": "https://example.com/{{data.category}}/type/{{data.type}}" }
+}
+```
+
 ## Validators
 
 Each input entry can have a `validator` object that filters extracted items. The validator supports two condition types. If both are present, both must pass (AND logic).
@@ -995,7 +1024,7 @@ Error emails are sent to all unique recipient addresses found across all rules i
 
 ## Examples
 
-The `skeleton/` directory contains two ready-to-use examples that are copied to `~/.mutimon/` on first run.
+The `skeleton/` directory contains ready-to-use examples that are copied to `~/.mutimon/` on first run.
 
 ### Hacker News — New stories
 
@@ -1094,6 +1123,45 @@ Monitors a Reddit subreddit via its Atom feed (Reddit serves `.rss` URLs as Atom
 }
 ```
 
+### Multiple Reddit subreddits — Hiring posts with `each`
+
+Monitors multiple subreddits for posts about hiring Python or JavaScript developers. Demonstrates:
+
+- **`each` expansion**: a single `input` object expands into multiple fetches, one per subreddit — no need to repeat the same params/validator for each
+- **Reusable validator**: `defs.validators` defines a named validator referenced by `@id` across all expanded entries
+- **Combined results**: all matching posts from all subreddits land in one email
+
+**Definition:** uses the same `reddit-atom` def from the previous example.
+
+**Reusable validator:**
+```json
+"validators": {
+  "reddit-hiring": [
+    { "test": "{% fresh date 604800 %}", "require": true },
+    { "match": { "var": "title", "regex": "(?i)\\b(hiring|hire|looking for)\\b.*(Python|JavaScript)" } }
+  ]
+}
+```
+
+**Rule:**
+```json
+{
+  "ref": "reddit-atom",
+  "name": "reddit-hiring-dev",
+  "schedule": "0 */4 * * *",
+  "subject": "[Reddit] {{count}} new hiring post(s)",
+  "template": "./templates/reddit",
+  "email": "you@example.com",
+  "input": {
+    "each": { "var": "subreddit", "values": ["Python", "JavaScript"] },
+    "params": { "subreddit": "{{subreddit}}" },
+    "validator": { "@id": "reddit-hiring" }
+  }
+}
+```
+
+**Files:** `skeleton/config.json` (reddit-atom def + rule), `skeleton/templates/reddit`
+
 ## Configuring with AI
 
 Mutimon ships with an AI instruction file that teaches any AI assistant how to add websites. Get its path with:
@@ -1160,6 +1228,14 @@ Or with any AI assistant — just paste the contents of the file as context alon
 > `{% fresh date 604800 %}` command to filter out posts older than 7 days,
 > since Reddit's feed sometimes returns stale posts. Read the README.md,
 > config.schema.json, and skeleton/config.json for reference.
+
+### Monitor multiple subreddits with `each`
+
+> Monitor r/Python and r/JavaScript subreddits for posts about hiring developers.
+> Use the `each` input expansion to avoid duplicating the input entry for each
+> subreddit. Filter titles containing "hiring", "hire", or "looking for" combined
+> with "Python" or "JavaScript". Use a reusable validator in `defs.validators`.
+> Check every 4 hours. Read the README.md and config.schema.json for reference.
 
 ### Extract data from Next.js JSON (embedded JSON)
 

@@ -551,14 +551,15 @@
           ]
         },
          "input": {
-           "description": "One or more input entries, each with its own params and optional validator. Use this to scrape multiple pages of the same type (e.g. multiple stock symbols) into a single rule. Can be a single object or an array. If omitted, 'params' is used directly.",
+           "description": "One or more input entries, each with its own params and optional validator. Use this to scrape multiple pages of the same type (e.g. multiple stock symbols) into a single rule. Can be a single object, an array, or an object with 'each' for expansion. If omitted, 'params' is used directly.",
            "oneOf": [
              { "$ref": "#/$defs/inputEntry" },
              {
                "type": "array",
                "items": { "$ref": "#/$defs/inputEntry" },
                "minItems": 1
-             }
+             },
+             { "$ref": "#/$defs/inputEach" }
            ]
          }
        }
@@ -633,6 +634,71 @@
               }
             }
           }
+        }
+      }
+    },
+    "inputEach": {
+      "type": "object",
+      "description": "Expands an array of strings into input entries. Each string replaces the named variable (e.g. {{subreddit}}) in template properties (params, validator, track). Reduces duplication when multiple inputs share the same structure.",
+      "required": ["each"],
+      "additionalProperties": false,
+      "properties": {
+        "each": {
+          "type": "object",
+          "description": "Defines the iteration variable and values. 'var' names the placeholder (used as {{var}} in params), 'values' lists the strings to expand.",
+          "required": ["var", "values"],
+          "additionalProperties": false,
+          "properties": {
+            "var": {
+              "type": "string",
+              "description": "Variable name used as {{var}} placeholder in params values.",
+              "examples": ["subreddit", "language"]
+            },
+            "values": {
+              "type": "array",
+              "description": "List of values to expand. Strings are replaced directly via {{var}}. Objects allow dot notation access via {{var.key}}.",
+              "items": {
+                "oneOf": [
+                  { "type": "string" },
+                  {
+                    "type": "object",
+                    "additionalProperties": {
+                      "oneOf": [
+                        { "type": "string" },
+                        { "type": "object" }
+                      ]
+                    }
+                  }
+                ]
+              },
+              "minItems": 1
+            }
+          }
+        },
+        "params": {
+          "type": "object",
+          "description": "Parameter template. The named variable placeholder in values is replaced with each element from the 'each.values' array.",
+          "additionalProperties": { "type": "string" }
+        },
+        "validator": {
+          "description": "Validator applied to all expanded entries.",
+          "oneOf": [
+            { "$ref": "#/$defs/validator" },
+            { "$ref": "#/$defs/validatorRef" },
+            {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  { "$ref": "#/$defs/validator" },
+                  { "$ref": "#/$defs/validatorRef" }
+                ]
+              },
+              "minItems": 1
+            }
+          ]
+        },
+        "track": {
+          "$ref": "#/$defs/inputEntry/properties/track"
         }
       }
     },

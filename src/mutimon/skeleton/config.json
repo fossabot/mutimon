@@ -103,6 +103,12 @@
         }
       }
     },
+    "validators": {
+      "reddit-hiring": [
+        { "test": "{% fresh date 604800 %}", "require": true },
+        { "match": { "var": "title", "regex": "(?i)\\b(hiring|hire|looking for)\\b.*(Python|JavaScript)" } }
+      ]
+    },
     "reddit-atom": {
       "params": ["subreddit"],
       "format": "xml",
@@ -186,6 +192,19 @@
       "email": "you@example.com",
       "params": {
         "subreddit": "scheme"
+      }
+    },
+    {
+      "ref": "reddit-atom",
+      "name": "reddit-hiring-dev",
+      "schedule": "0 */4 * * *",
+      "subject": "[Reddit] {{count}} new hiring post(s)",
+      "template": "./templates/reddit",
+      "email": "you@example.com",
+      "input": {
+        "each": { "var": "subreddit", "values": ["Python", "JavaScript"] },
+        "params": { "subreddit": "{{subreddit}}" },
+        "validator": { "@id": "reddit-hiring" }
       }
     }
   ]
